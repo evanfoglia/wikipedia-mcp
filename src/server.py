@@ -113,7 +113,9 @@ def dino_fact(species: str = "") -> str:
         url = f"{BASE_URL}/page/summary/{title_slug}"
         resp = _get(url)
         if resp.status_code == 404:
-            return f"Couldn't find '{species}' on Wikipedia. Try the full name (e.g. 'Tyrannosaurus')."
+            # Fall back to search
+            search_result = search_wikipedia(f"{species} dinosaur", limit=3)
+            return f"Couldn't find '{species}' directly on Wikipedia. Try searching:\n\n{search_result}"
         resp.raise_for_status()
         data = resp.json()
         fact = data.get('extract', '')
