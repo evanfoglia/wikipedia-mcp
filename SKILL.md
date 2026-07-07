@@ -1,7 +1,7 @@
 ---
 name: wikipedia
-version: 1.0.1
-description: Access Wikipedia via MCP — search articles, get summaries, random facts, and dinosaur-specific facts. Great for research, hooks, and general knowledge lookups.
+version: 1.1.0
+description: Access Wikipedia via MCP — search articles, get summaries, random facts, dinosaur facts, and today's featured article. Multi-language support (10 wikis). Great for research, content hooks, and general knowledge lookups.
 ---
 
 # Wikipedia MCP
@@ -17,8 +17,11 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `random` | Random Wikipedia article |
 | `did_you_know` | Random "Did You Know" fact |
 | `dino_fact` | Dinosaur/prehistory fact (specific species or random) |
+| `featured_article` | Today's Wikipedia Featured Article |
 
-## Installation (Universal)
+All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
+
+## Installation
 
 ### 1. Install dependencies
 
@@ -30,22 +33,15 @@ pip install -r requirements.txt
 
 ### 2. Find your install path
 
-After `clawhub install wikipedia`, the skill lands in your skills directory. The MCP server is at:
-
-```
-<install-dir>/src/server.py
-```
-
-For example, if you installed into `~/.openclaw/workspace/skills/`:
+The MCP server lives at `<install-dir>/src/server.py`.
 
 ```bash
-# Confirm the path
 ls ~/.openclaw/workspace/skills/wikipedia/src/server.py
 ```
 
 ### 3. Add to mcporter
 
-Add this to your mcporter config (e.g. `~/.openclaw/workspace/config/mcporter.json`):
+Add to `~/.openclaw/workspace/config/mcporter.json`:
 
 ```json
 {
@@ -74,6 +70,8 @@ mcporter call wikipedia summary --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia dino_fact --args '{"species": "Spinosaurus"}'
 mcporter call wikipedia dino_fact
 mcporter call wikipedia did_you_know
+mcporter call wikipedia featured_article
+mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
 
 ## Data Source
@@ -81,11 +79,12 @@ mcporter call wikipedia did_you_know
 Uses Wikipedia's free public REST API — no API key required.
 
 - Search: MediaWiki Action API
-- Summary: REST API v1 (`/page/summary/{title}`)
-- Random: REST API v1 (`/page/random/summary`)
+- Summary / Random / Featured: REST API v1 (`/api/rest_v1/...`)
 
 ## Notes
 
-- User-Agent is set to `wikipedia-mcp/1.0` for Wikipedia API etiquette
-- All responses include links back to the source article on en.wikipedia.org
-- `dino_fact` falls back to a random species if the requested one isn't found
+- User-Agent is `wikipedia-mcp/1.1.0` per Wikipedia API etiquette
+- All responses include links back to the source article
+- `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
+- `featured_article` returns today's curated Featured Article — great for daily content hooks
+- Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
