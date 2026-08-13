@@ -1,6 +1,6 @@
 ---
 name: wikipedia
-version: 1.1.0
+version: 1.1.2
 description: Access Wikipedia via MCP — search articles, get summaries, random facts, dinosaur facts, and today's featured article. Multi-language support (10 wikis). Great for research, content hooks, and general knowledge lookups.
 ---
 
