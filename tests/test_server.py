@@ -84,6 +84,43 @@ def main() -> int:
     out = server.get_summary("Berlin", lang="de")
     check("returns German article", out.startswith("## "), out[:300])
 
+    section("_call_tool dispatch routing")
+    # Every registered MCP tool name must route through the dispatcher
+    # (i.e. NOT return the "Unknown tool" fallback). This is the layer
+    # MCP clients actually call via tools/call — if it breaks, the
+    # whole server breaks even though individual functions still work.
+    routed_ok = set()
+    for tool_def in server.TOOLS:
+        name = tool_def["name"]
+        if name == "search":
+            out = server._call_tool(name, {"query": "test", "limit": 1})
+        elif name == "summary":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "dino_fact":
+            out = server._call_tool(name, {"species": ""})
+        else:
+            out = server._call_tool(name, {})
+        check(
+            f"'{name}' routes through dispatcher",
+            "Unknown tool" not in out,
+            out[:200],
+        )
+        if "Unknown tool" not in out:
+            routed_ok.add(name)
+    expected_names = {t["name"] for t in server.TOOLS}
+    check(
+        "every registered tool is routable",
+        routed_ok == expected_names,
+        f"missing: {expected_names - routed_ok}",
+    )
+    # Unknown tool name returns a clear, non-empty message
+    out = server._call_tool("definitely_not_a_real_tool", {})
+    check(
+        "unknown tool returns clear message",
+        "Unknown tool: definitely_not_a_real_tool" in out,
+        out,
+    )
+
     print(f"\n{PASS} passed, {FAIL} failed")
     return 0 if FAIL == 0 else 1
 
