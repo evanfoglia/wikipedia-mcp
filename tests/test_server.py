@@ -84,6 +84,25 @@ def main() -> int:
     out = server.get_summary("Berlin", lang="de")
     check("returns German article", out.startswith("## "), out[:300])
 
+    section("language validation fallback")
+    # _base() and _wiki() silently coerce unsupported langs to "en" so a
+    # bad/typo'd lang string can't route a request to the wrong Wikipedia.
+    # Test the validation directly (no network) so regressions get caught
+    # even if the live calls happen to succeed.
+    check("_base('en') → en rest_v1", server._base("en") == "https://en.wikipedia.org/api/rest_v1")
+    check("_base('de') → de rest_v1", server._base("de") == "https://de.wikipedia.org/api/rest_v1")
+    check("_base('ja') → ja rest_v1", server._base("ja") == "https://ja.wikipedia.org/api/rest_v1")
+    check("_base('') → en rest_v1 (default)", server._base("") == "https://en.wikipedia.org/api/rest_v1")
+    check("_base('invalid') → falls back to en", server._base("invalid") == "https://en.wikipedia.org/api/rest_v1")
+    check("_base('EN') → case-sensitive fallback to en", server._base("EN") == "https://en.wikipedia.org/api/rest_v1")
+    check("_wiki('en') → en api.php", server._wiki("en") == "https://en.wikipedia.org/w/api.php")
+    check("_wiki('de') → de api.php", server._wiki("de") == "https://de.wikipedia.org/w/api.php")
+    check("_wiki('invalid') → falls back to en", server._wiki("invalid") == "https://en.wikipedia.org/w/api.php")
+    check("_wiki('Klingon') → falls back to en", server._wiki("Klingon") == "https://en.wikipedia.org/w/api.php")
+    # Unsupported lang flows through to live calls without crashing
+    out = server.get_summary("Berlin", lang="Klingon")
+    check("unsupported lang still returns an article", out.startswith("## "), out[:200])
+
     section("_call_tool dispatch routing")
     # Every registered MCP tool name must route through the dispatcher
     # (i.e. NOT return the "Unknown tool" fallback). This is the layer
