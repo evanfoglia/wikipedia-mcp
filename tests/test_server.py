@@ -49,6 +49,15 @@ def main() -> int:
     out = server.get_summary("ThisArticleDoesNotExist12345")
     check("404 message", "not found" in out, out)
 
+    section("get_summary — input edge cases")
+    # Empty title → URL becomes /page/summary/ → Wikipedia returns 404.
+    # Guards against regression where an uncaught exception could surface to the MCP client.
+    out = server.get_summary("")
+    check("empty title returns graceful 404", "not found" in out, out)
+    # Whitespace-only title: _slug strips, so URL is empty → 404.
+    out = server.get_summary("   ")
+    check("whitespace title returns graceful 404", "not found" in out, out)
+
     section("get_random")
     out = server.get_random()
     check("title rendered", out.startswith("## "), out[:200])
