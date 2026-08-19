@@ -40,6 +40,18 @@ def main() -> int:
     out = server.search_wikipedia("xyzzynonesuch", limit=3)
     check("graceful empty", "No results found" in out, out)
 
+    section("search_wikipedia — limit clamping")
+    # Source: `limit = max(1, min(int(limit), 20))` — verify extreme inputs don't crash
+    out = server.search_wikipedia("velociraptor", limit=0)
+    check("limit=0 doesn't crash", "**" in out, out[:200])
+
+    out = server.search_wikipedia("velociraptor", limit=-5)
+    check("limit=-5 doesn't crash", "**" in out, out[:200])
+
+    out = server.search_wikipedia("velociraptor", limit=100)
+    list_items = sum(out.count(f"\n{i}. ") for i in range(1, 21))
+    check("limit=100 clamps to <=20 results", list_items <= 20, f"got {list_items}")
+
     section("get_summary")
     out = server.get_summary("Tyrannosaurus")
     check("title rendered", "## Tyrannosaurus" in out, out[:200])
