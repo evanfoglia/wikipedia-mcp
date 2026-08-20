@@ -99,7 +99,10 @@ def _summary_block(data: dict, fallback_title: str) -> str:
 # ---------------------------------------------------------------------------
 def search_wikipedia(query: str, limit: int = 5, lang: str = "en") -> str:
     """Search Wikipedia for articles matching a query."""
-    limit = max(1, min(int(limit), 20))
+    try:
+        limit = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        limit = 5  # fall back to default on garbage input
     params = {
         "action": "query",
         "list": "search",

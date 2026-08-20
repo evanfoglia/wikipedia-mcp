@@ -40,6 +40,30 @@ def main() -> int:
     out = server.search_wikipedia("xyzzynonesuch", limit=3)
     check("graceful empty", "No results found" in out, out)
 
+    section("search_wikipedia — limit clamping + type safety")
+    # limit above 20 should be clamped to ≤20
+    out = server.search_wikipedia("dinosaur", limit=100)
+    numbered = sum(1 for i in range(1, 21) if f"\n{i}. " in out)
+    check("limit=100 clamps to ≤20 results", numbered <= 20, f"got {numbered} items")
+
+    # limit <= 0 should be clamped to 1 (no result number 2+ should appear)
+    out = server.search_wikipedia("dinosaur", limit=-5)
+    check(
+        "limit=-5 clamps to 1",
+        "\n1. " in out and "\n2. " not in out,
+        out[:300],
+    )
+
+    # Non-integer limit must not crash — fall back to default (5)
+    out = server.search_wikipedia("dinosaur", limit="abc")
+    check(
+        "non-int limit returns results (no crash)",
+        out.startswith("**Search results"),
+        out[:300],
+    )
+    numbered = sum(1 for i in range(1, 21) if f"\n{i}. " in out)
+    check("non-int limit uses default 5", numbered <= 5, f"got {numbered} items")
+
     section("get_summary")
     out = server.get_summary("Tyrannosaurus")
     check("title rendered", "## Tyrannosaurus" in out, out[:200])
