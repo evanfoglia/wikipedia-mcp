@@ -11,6 +11,7 @@ import json
 import random
 import re
 import sys
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -211,8 +212,44 @@ def featured_article(lang: str = "en") -> str:
     return _summary_block(data, fallback_title=data.get("title", "Featured Article"))
 
 
+def on_this_day(lang: str = "en", count: int = 5) -> str:
+    """Get historical events that happened on today's date from Wikipedia.
+
+    Returns a random sample of events from Wikipedia's "On This Day" feed
+    for the current UTC date. Pairs well with featured_article for daily
+    content hooks — e.g. "today in history" newsletter intros.
+    """
+    try:
+        count = max(1, min(int(count), 10))
+    except (TypeError, ValueError):
+        count = 5
+    today_mm_dd = datetime.now(timezone.utc).strftime("%m/%d")
+    resp = _get(f"{_base(lang)}/feed/onthisday/events/{today_mm_dd}")
+    if resp.status_code == 404:
+        return f"No 'on this day' events available for {lang}.wikipedia.org today."
+    resp.raise_for_status()
+    events = resp.json().get("events", [])
+    if not events:
+        return f"No historical events found for today on {lang}.wikipedia.org."
+
+    sample = random.sample(events, min(count, len(events)))
+    out = "**On this day:**\n\n"
+    for ev in sample:
+        year = ev.get("year", "?")
+        text = _strip_html(ev.get("text", ""))
+        out += f"- **{year}** — {text}\n"
+        pages = ev.get("pages", [])
+        if pages:
+            page_title = pages[0].get("title", "")
+            if page_title:
+                out += (
+                    f"  [Read on Wikipedia]"
+                    f"(https://{lang}.wikipedia.org/wiki/{page_title})\n"
+                )
+    return out
+
+
 def _today() -> str:
-    from datetime import datetime, timezone
     return datetime.now(timezone.utc).strftime("%Y/%m/%d")
 
 
@@ -332,6 +369,31 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "on_this_day",
+        "description": (
+            "Get historical events that happened on today's date (UTC) "
+            "from Wikipedia's 'On This Day' feed. Returns a random sample "
+            "of events with year + description + Wikipedia link — great "
+            "daily content hook alongside featured_article."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of events to return (default 5, max 10)",
+                    "default": 5,
+                },
+            },
+        },
+    },
 ]
 
 
@@ -348,6 +410,8 @@ def _call_tool(name: str, args: dict) -> str:
         return dino_fact(**args)
     if name == "featured_article":
         return featured_article(**args)
+    if name == "on_this_day":
+        return on_this_day(**args)
     return f"Unknown tool: {name}"
 
 
