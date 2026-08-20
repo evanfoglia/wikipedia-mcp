@@ -88,3 +88,11 @@ Uses Wikipedia's free public REST API — no API key required.
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
+
+## ClawHub
+
+This skill is published on ClawHub as **Wikipedia** under the canonical slug `wikipedia` (1.6k+ downloads, 40 installs as of Aug 20 2026).
+
+Do **NOT** publish to slug `wikipedia-mcp` — that is the abandoned duplicate skill (140 DL, 0 installs, lowercase "wikipedia" display name).
+
+GitHub source: https://github.com/evanfoglia/wikipedia-mcp
