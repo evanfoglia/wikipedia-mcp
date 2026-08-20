@@ -107,10 +107,36 @@ def main() -> int:
     out = server.featured_article()
     check("returns markdown", out.startswith("## "), out[:200])
 
+    section("on_this_day")
+    out = server.on_this_day()
+    check("returns header", out.startswith("**On this day"), out[:200])
+    check("contains at least one event", "- **" in out, out[:300])
+    check("contains Wikipedia link", "wikipedia.org/wiki/" in out, out[:500])
+
+    section("on_this_day — count clamping")
+    out = server.on_this_day(count=3)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=3 returns ≤3 events", bullet_count <= 3, f"got {bullet_count}")
+    out = server.on_this_day(count=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=999 clamps to ≤10", bullet_count <= 10, f"got {bullet_count}")
+    out = server.on_this_day(count=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+
+    section("on_this_day — non-int count falls back gracefully")
+    out = server.on_this_day(count="abc")
+    check("non-int count returns events (no crash)", out.startswith("**On this day"), out[:300])
+
+    section("on_this_day — multi-language")
+    out = server.on_this_day(lang="de")
+    check("de returns events", out.startswith("**On this day"), out[:300])
+    check("de wikipedia.org link", "de.wikipedia.org/wiki/" in out, out[:500])
+
     section("tool registry")
-    check("all 6 tools listed", len(server.TOOLS) == 6)
+    check("all 7 tools listed", len(server.TOOLS) == 7)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "on_this_day"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("multi-language (de)")
@@ -150,6 +176,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "dino_fact":
             out = server._call_tool(name, {"species": ""})
+        elif name == "on_this_day":
+            out = server._call_tool(name, {})
         else:
             out = server._call_tool(name, {})
         check(

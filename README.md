@@ -12,6 +12,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `did_you_know` | Get a random "Did You Know" style fact |
 | `dino_fact` | Get a dino/prehistory-specific fact (specific species or random) |
 | `featured_article` | Get today's Wikipedia Featured Article |
+| `on_this_day` | Get historical events that happened on today's date |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
 
@@ -58,6 +59,10 @@ mcporter call wikipedia dino_fact --args '{"species": "Spinosaurus"}'
 
 # Today's featured article
 mcporter call wikipedia featured_article
+
+# On this day (historical events for today)
+mcporter call wikipedia on_this_day
+mcporter call wikipedia on_this_day --args '{"count": 8}'
 
 # Non-English Wikipedia
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
