@@ -103,6 +103,38 @@ def main() -> int:
     check("fallback message present", "Couldn't find" in out, out[:200])
     check("still returns a fact", "Did you know about" in out, out[:500])
 
+    section("article_extract")
+    out = server.article_extract("Tyrannosaurus")
+    check("title rendered", "## Tyrannosaurus" in out, out[:200])
+    # Strip the markdown header + footer link to confirm body has no HTML tags
+    body = out.split("\n\n", 2)[1] if "\n\n" in out else out
+    check("plain text (no HTML tags in body)", "<" not in body and ">" not in body, body[:300])
+    check("contains body text", "theropod" in out, out[:500])
+    summary_out = server.get_summary("Tyrannosaurus")
+    check(
+        "longer than summary extract",
+        len(out) > len(summary_out),
+        f"extract={len(out)} summary={len(summary_out)}",
+    )
+
+    section("article_extract — 404")
+    out = server.article_extract("ThisArticleDoesNotExist12345")
+    check("404 message", "not found" in out, out)
+
+    section("article_extract — multi-language")
+    out = server.article_extract("Berlin", lang="de")
+    check("de title rendered", "## " in out and "Berlin" in out, out[:200])
+    check("de link present", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("article_extract — input edge cases")
+    out = server.article_extract("")
+    check("empty title returns graceful result", "not found" in out or "No extract" in out, out)
+
+    section("article_extract — dispatcher routing")
+    out = server._call_tool("article_extract", {"title": "Velociraptor"})
+    check("dispatcher routes to article_extract", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "## " in out, out[:200])
+
     section("featured_article")
     out = server.featured_article()
     check("returns markdown", out.startswith("## "), out[:200])
@@ -160,9 +192,9 @@ def main() -> int:
     check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
 
     section("tool registry")
-    check("all 8 tools listed", len(server.TOOLS) == 8)
+    check("all 9 tools listed", len(server.TOOLS) == 9)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "on_this_day", "categories"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("multi-language (de)")
@@ -202,6 +234,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "dino_fact":
             out = server._call_tool(name, {"species": ""})
+        elif name == "article_extract":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "on_this_day":
             out = server._call_tool(name, {})
         elif name == "categories":

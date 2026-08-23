@@ -200,6 +200,44 @@ def dino_fact(species: str = "", lang: str = "en") -> str:
     )
 
 
+def article_extract(title: str, lang: str = "en") -> str:
+    """Get a Wikipedia article's full plain-text extract by title (vs `summary`).
+
+    Uses the MediaWiki Action API `prop=extracts` with `explaintext=1` to return
+    the full article body as plain text — typically several paragraphs, much
+    longer than `summary`'s short extract. Complements `summary`: use `summary`
+    for the lead + thumbnail, `article_extract` when you want to read more
+    without parsing HTML.
+    """
+    params = {
+        "action": "query",
+        "prop": "extracts",
+        "explaintext": 1,
+        "exsectionformat": "plain",
+        "titles": title,
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    page = next(iter(pages.values()), {}) if pages else {}
+    # MediaWiki Action API returns 200 OK with a "missing" marker for
+    # non-existent pages rather than a 404 HTTP status. Detect that
+    # explicitly so users see the same "not found" message as `summary`.
+    if not page or "missing" in page:
+        return f"Article '{title}' not found on Wikipedia."
+    extract = (page.get("extract") or "").strip()
+    title_out = (page.get("title") or title) if page else title
+    if not extract:
+        return f"No extract available for '{title_out}'."
+    desktop_url = f"https://{lang}.wikipedia.org/wiki/{_slug(title_out)}"
+    return f"## {title_out}\n\n{extract}\n\n[Read more →]({desktop_url})"
+
+
 def featured_article(lang: str = "en") -> str:
     """Get today's Wikipedia Featured Article (great content hook)."""
     resp = _get(f"{_base(lang)}/feed/featured/{_today()}")
@@ -409,6 +447,31 @@ TOOLS = [
         },
     },
     {
+        "name": "article_extract",
+        "description": (
+            "Get a Wikipedia article's full plain-text extract by title — "
+            "much longer than `summary` (typically several paragraphs). "
+            "Returns plain text (no HTML). Complements `summary`: use it "
+            "when the summary is too brief and you want a fuller reading."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "featured_article",
         "description": "Get today's Wikipedia Featured Article — a curated long-form pick, perfect for content hooks",
         "inputSchema": {
@@ -493,6 +556,8 @@ def _call_tool(name: str, args: dict) -> str:
         return dino_fact(**args)
     if name == "featured_article":
         return featured_article(**args)
+    if name == "article_extract":
+        return article_extract(**args)
     if name == "on_this_day":
         return on_this_day(**args)
     if name == "categories":
