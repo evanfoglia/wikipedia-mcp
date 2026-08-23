@@ -18,7 +18,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.3"
+SERVER_VERSION = "1.1.4"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -253,6 +253,60 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y/%m/%d")
 
 
+def categories(title: str, limit: int = 20, lang: str = "en") -> str:
+    """List Wikipedia categories for an article.
+
+    Returns the Wikipedia categories an article belongs to (e.g.
+    "Late Cretaceous dinosaurs", "Articles containing Latin-language text").
+    Useful for taxonomy-based discovery — finding related topics that
+    don't show up in text search. Hidden/maintenance categories are
+    filtered out so the result is high-signal.
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    params = {
+        "action": "query",
+        "prop": "categories",
+        "titles": title,
+        "cllimit": limit,
+        "clshow": "!hidden",
+        "clsort": "sortkey",
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No categories found for '{title}'."
+
+    # API returns pages as {pageid: {...}}; missing pages have id=-1
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None or page.get("title", "") == "" and "categories" not in page:
+        return f"Article '{title}' not found on Wikipedia."
+    cats = page.get("categories", [])
+    if not cats:
+        return f"No categories found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    out = f"**Categories for \"{page_title}\":**\n\n"
+    for cat in cats:
+        # Strip "Category:" prefix for cleaner display
+        name = cat.get("title", "").replace("Category:", "", 1)
+        if name:
+            out += f"- {name}\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -394,6 +448,35 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "categories",
+        "description": (
+            "List Wikipedia categories an article belongs to. Useful for "
+            "taxonomy-based discovery — finding related topics that don't "
+            "appear in text search. Hidden/maintenance categories are filtered out."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max categories to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -412,6 +495,8 @@ def _call_tool(name: str, args: dict) -> str:
         return featured_article(**args)
     if name == "on_this_day":
         return on_this_day(**args)
+    if name == "categories":
+        return categories(**args)
     return f"Unknown tool: {name}"
 
 
