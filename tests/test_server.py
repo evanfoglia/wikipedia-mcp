@@ -165,10 +165,36 @@ def main() -> int:
     check("de returns events", out.startswith("**On this day"), out[:300])
     check("de wikipedia.org link", "de.wikipedia.org/wiki/" in out, out[:500])
 
+    section("categories")
+    out = server.categories("Tyrannosaurus")
+    check("returns header", out.startswith("**Categories for"), out[:200])
+    check("contains a bullet list", "- Dinosaur genera" in out or "- Tyrannosaurus" in out, out[:500])
+    check("article link present", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+    check("no Category: prefix", "Category:" not in out, out[:500])
+
+    section("categories — limit clamping + type safety")
+    out = server.categories("Tyrannosaurus", limit=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=999 clamps to ≤50", bullet_count <= 50, f"got {bullet_count}")
+    out = server.categories("Tyrannosaurus", limit=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+    out = server.categories("Tyrannosaurus", limit="abc")
+    check("non-int limit returns categories (no crash)", out.startswith("**Categories for"), out[:300])
+
+    section("categories — missing article")
+    out = server.categories("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:300])
+
+    section("categories — multi-language")
+    out = server.categories("Berlin", limit=5, lang="de")
+    check("de returns categories", out.startswith("**Categories for"), out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
     section("tool registry")
-    check("all 8 tools listed", len(server.TOOLS) == 8)
+    check("all 9 tools listed", len(server.TOOLS) == 9)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("multi-language (de)")
@@ -212,6 +238,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "on_this_day":
             out = server._call_tool(name, {})
+        elif name == "categories":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         else:
             out = server._call_tool(name, {})
         check(
