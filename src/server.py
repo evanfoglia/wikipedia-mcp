@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Wikipedia MCP Server
-Provides: search, summary, random, did_you_know, dino_fact
+Provides: search, summary, random, did_you_know, dino_fact, featured_article,
+article_extract, on_this_day, categories, links
 Uses Wikipedia REST API — free, no API key required.
 
 Hand-rolled JSON-RPC stdio MCP for maximum portability (no SDK dependency).
@@ -345,6 +346,58 @@ def categories(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def links(title: str, limit: int = 20, lang: str = "en") -> str:
+    """List outgoing Wikipedia links from an article.
+
+    Returns titles of articles linked from the article body (nav boxes,
+    sidebars, and category references are excluded via plnamespace=0).
+    Useful for graph-style discovery — finding related topics the
+    article actually references. Pairs with `categories`: `categories`
+    answers "what topic buckets does this belong to?", `links` answers
+    "what other articles does this reference?"
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    params = {
+        "action": "query",
+        "prop": "links",
+        "titles": title,
+        "pllimit": limit,
+        "plnamespace": 0,  # restrict to main namespace (articles only)
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No links found for '{title}'."
+
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    page_links = page.get("links", [])
+    if not page_links:
+        return f"No outgoing links found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    out = f"**Links from \"{page_title}\":**\n\n"
+    for link in page_links:
+        name = link.get("title", "")
+        if name:
+            out += f"- {name}\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -540,6 +593,38 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "links",
+        "description": (
+            "List outgoing Wikipedia links from an article body (main namespace "
+            "only — nav boxes, sidebars, and category refs excluded). Useful "
+            "for graph-style discovery — finding related topics the article "
+            "actually references. Pairs with `categories`: `categories` answers "
+            "\"what topic buckets does this belong to?\", `links` answers "
+            "\"what other articles does this reference?\"."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max links to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -562,6 +647,8 @@ def _call_tool(name: str, args: dict) -> str:
         return on_this_day(**args)
     if name == "categories":
         return categories(**args)
+    if name == "links":
+        return links(**args)
     return f"Unknown tool: {name}"
 
 

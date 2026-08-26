@@ -15,6 +15,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `article_extract` | Get a full plain-text extract of an article (longer than `summary`) |
 | `on_this_day` | Get historical events that happened on today's date |
 | `categories` | List Wikipedia categories an article belongs to |
+| `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
 
@@ -72,6 +73,10 @@ mcporter call wikipedia on_this_day --args '{"count": 8}'
 # Categories for an article (taxonomy-based discovery)
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus", "limit": 10}'
+
+# Outgoing links from an article (graph-style discovery)
+mcporter call wikipedia links --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia links --args '{"title": "Tyrannosaurus", "limit": 10}'
 
 # Non-English Wikipedia
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'

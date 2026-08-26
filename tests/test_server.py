@@ -191,10 +191,51 @@ def main() -> int:
     check("de returns categories", out.startswith("**Categories for"), out[:300])
     check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
 
+    section("links")
+    out = server.links("Tyrannosaurus")
+    check("returns header", out.startswith("**Links from"), out[:200])
+    check("contains bullet list", "- " in out, out[:500])
+    check("article link present", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+    # Tyrannosaurus article body links include close tyrannosaurid relatives like Albertosaurus
+    # and fellow theropods like Acrocanthosaurus — these appear in the first 20 alphabetical links.
+    check(
+        "body link to related tyrannosaurid/theropod",
+        any(t in out for t in ["Albertosaurus", "Acrocanthosaurus", "Alamosaurus"]),
+        out[:1500],
+    )
+
+    section("links — limit clamping + type safety")
+    out = server.links("Tyrannosaurus", limit=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=999 clamps to ≤50", bullet_count <= 50, f"got {bullet_count}")
+    out = server.links("Tyrannosaurus", limit=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+    out = server.links("Tyrannosaurus", limit="abc")
+    check(
+        "non-int limit returns links (no crash)",
+        out.startswith("**Links from"),
+        out[:300],
+    )
+
+    section("links — missing article")
+    out = server.links("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:300])
+
+    section("links — multi-language")
+    out = server.links("Berlin", limit=5, lang="de")
+    check("de returns links", out.startswith("**Links from"), out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("links — dispatcher routing")
+    out = server._call_tool("links", {"title": "Velociraptor"})
+    check("dispatcher routes to links", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "**Links from" in out, out[:200])
+
     section("tool registry")
-    check("all 9 tools listed", len(server.TOOLS) == 9)
+    check("all 10 tools listed", len(server.TOOLS) == 10)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("multi-language (de)")
@@ -239,6 +280,8 @@ def main() -> int:
         elif name == "on_this_day":
             out = server._call_tool(name, {})
         elif name == "categories":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "links":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
             out = server._call_tool(name, {})
