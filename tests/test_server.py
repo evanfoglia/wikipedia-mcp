@@ -230,10 +230,49 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 10 tools listed", len(server.TOOLS) == 10)
+    check("all 11 tools listed", len(server.TOOLS) == 11)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews"}
     check("expected tool names", names == expected, f"got {names}")
+
+    section("pageviews")
+    out = server.pageviews("Tyrannosaurus")
+    check("returns header", "Pageviews for" in out, out[:300])
+    check("table present", "| Date | Views |" in out, out[:500])
+    check("at least one day shown", "|" in out and "202" in out, out[:1000])
+    check("total + average present", "Total views:" in out and "Daily average:" in out, out[:500])
+    check("wikipedia link included", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:1000])
+
+    section("pageviews — custom date range")
+    out = server.pageviews("Python_(programming_language)", start="20250101", end="20250107")
+    check("returns data", "Pageviews for" in out, out[:300])
+    check("7 days in window", out.count("| 2025-01-") == 7, out[:1500])
+
+    section("pageviews — missing article")
+    out = server.pageviews("ThisArticleDoesNotExist12345")
+    check("missing returns clear message", "No pageviews data found" in out, out[:300])
+
+    section("pageviews — invalid date format")
+    out = server.pageviews("Tyrannosaurus", start="bad-date")
+    check("invalid start returns error", "Error" in out and "YYYYMMDD" in out, out[:300])
+
+    section("pageviews — start after end")
+    out = server.pageviews("Tyrannosaurus", start="20250110", end="20250101")
+    check("reversed range returns error", "after end" in out, out[:300])
+
+    section("pageviews — empty title")
+    out = server.pageviews("")
+    check("empty title returns error", "title is required" in out, out[:300])
+
+    section("pageviews — multi-language")
+    out = server.pageviews("Berlin", lang="de")
+    check("de returns pageviews", "Pageviews for" in out, out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("pageviews — dispatcher routing")
+    out = server._call_tool("pageviews", {"title": "Velociraptor"})
+    check("dispatcher routes to pageviews", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Pageviews for" in out, out[:200])
 
     section("multi-language (de)")
     out = server.get_summary("Berlin", lang="de")
@@ -279,6 +318,8 @@ def main() -> int:
         elif name == "categories":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "links":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "pageviews":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
             out = server._call_tool(name, {})

@@ -11,14 +11,14 @@ import json
 import random
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.4"
+SERVER_VERSION = "1.1.5"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -399,6 +399,96 @@ def categories(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def pageviews(title: str, start: str = "", end: str = "", lang: str = "en") -> str:
+    """Get daily view counts for a Wikipedia article over a date range.
+
+    Uses Wikimedia's pageviews REST API (per-article, all-access, daily
+    granularity). Useful for popularity research, trending topics, and
+    historical interest — e.g. "how is X trending this week?" or
+    "what was the spike on date Y?".
+
+    Returns a markdown table with daily views, total, and daily average.
+    Default window is the last 7 days ending yesterday (UTC). The
+    article must have measurable traffic — very new or very niche
+    articles may return 404 from the pageviews API.
+    """
+    if not title or not title.strip():
+        return "Error: title is required."
+
+    # Validate lang (use SUPPORTED_LANGS so the URL is consistent and
+    # falls back to "en" rather than producing a 404 for typos).
+    lang = lang if lang in SUPPORTED_LANGS else "en"
+
+    # Default dates: 7-day window ending yesterday UTC.
+    if end == "":
+        end_dt = datetime.now(timezone.utc) - timedelta(days=1)
+        end = end_dt.strftime("%Y%m%d")
+    if start == "":
+        try:
+            end_dt = datetime.strptime(end, "%Y%m%d")
+        except ValueError:
+            return f"Error: end date must be in YYYYMMDD format (got '{end}')"
+        start = (end_dt - timedelta(days=6)).strftime("%Y%m%d")
+
+    try:
+        datetime.strptime(start, "%Y%m%d")
+        datetime.strptime(end, "%Y%m%d")
+    except ValueError:
+        return f"Error: dates must be in YYYYMMDD format (got start='{start}', end='{end}')"
+
+    if start > end:
+        return f"Error: start date {start} is after end date {end}"
+
+    encoded_title = _slug(title)
+    # Pageviews API is a cross-wiki metric hosted centrally on wikimedia.org,
+    # not on the per-language wiki. Use wikimedia.org as the base regardless
+    # of `lang`; the language-specific project (e.g. "en.wikipedia") lives in
+    # the URL path, not the host.
+    url = (
+        f"https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/"
+        f"{lang}.wikipedia/all-access/user/{encoded_title}/daily/{start}00/{end}00"
+    )
+
+    try:
+        resp = _get(url)
+    except requests.RequestException as e:
+        return f"Error fetching pageviews: {e}"
+
+    if resp.status_code == 404:
+        return (
+            f"No pageviews data found for '{title}' in {lang}.wikipedia "
+            f"between {start} and {end}. Article may not exist or have "
+            f"insufficient history."
+        )
+    if resp.status_code != 200:
+        return f"Error: pageviews API returned {resp.status_code} for '{title}'."
+
+    data = resp.json()
+    items = data.get("items", [])
+
+    if not items:
+        return f"No pageviews found for '{title}' in {lang} between {start} and {end}."
+
+    total = sum(item["views"] for item in items)
+    avg = total // len(items) if items else 0
+
+    page_title = items[0].get("article", title).replace("_", " ")
+
+    out = f'**Pageviews for "{page_title}"** ({lang}.wikipedia)\n\n'
+    out += f"**Period:** {start} → {end} ({len(items)} days)  \n"
+    out += f"**Total views:** {total:,}  |  **Daily average:** {avg:,}\n\n"
+    out += "| Date | Views |\n"
+    out += "|------|------:|\n"
+
+    for item in items:
+        ts = item["timestamp"]
+        date_str = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+        out += f"| {date_str} | {item['views']:,} |\n"
+
+    out += f"\n[View article](https://{lang}.wikipedia.org/wiki/{encoded_title})"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -625,6 +715,40 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "pageviews",
+        "description": (
+            "Get daily view counts for a Wikipedia article over a date range "
+            "(popularity research, trending topics, historical interest). "
+            "Uses Wikimedia's pageviews REST API. Default window is the "
+            "last 7 days ending yesterday UTC. Returns total + daily average "
+            "+ markdown table of daily views."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "start": {
+                    "type": "string",
+                    "description": "Start date in YYYYMMDD (default: 7 days before end)",
+                },
+                "end": {
+                    "type": "string",
+                    "description": "End date in YYYYMMDD (default: yesterday UTC)",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -649,6 +773,8 @@ def _call_tool(name: str, args: dict) -> str:
         return categories(**args)
     if name == "links":
         return links(**args)
+    if name == "pageviews":
+        return pageviews(**args)
     return f"Unknown tool: {name}"
 
 
