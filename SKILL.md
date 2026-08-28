@@ -23,6 +23,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
 | `pageviews` | Daily view counts for an article (popularity research, trending topics) |
+| `news` | Current events from Wikipedia's Main Page "In the news" section |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
 
@@ -85,6 +86,8 @@ mcporter call wikipedia links --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia links --args '{"title": "Tyrannosaurus", "limit": 30}'
 mcporter call wikipedia pageviews --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia pageviews --args '{"title": "Python_(programming_language)", "start": "20250101", "end": "20250107"}'
+mcporter call wikipedia news
+mcporter call wikipedia news --args '{"limit": 8}'
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
 
@@ -106,6 +109,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `categories` returns Wikipedia categories for an article (hidden/maintenance categories filtered) — useful for taxonomy-based discovery beyond text search
 - `links` returns the article's outgoing Wikipedia links (main namespace only) — graph-style discovery showing which genera, people, and concepts an article references
 - `pageviews` returns daily view counts for an article over a date range (default last 7 days) — popularity research, trending topics, historical interest spikes. Uses Wikimedia's pageviews REST API.
+- `news` returns today's editorially-curated current events from Wikipedia's Main Page "In the news" block — pairs with featured_article (today's long-form) and on_this_day (historical) for a full "today in Wikipedia" content hook
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub

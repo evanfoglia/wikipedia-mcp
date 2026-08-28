@@ -17,6 +17,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
 | `pageviews` | Get daily view counts for an article (popularity, trending, historical interest) |
+| `news` | Get current events from Wikipedia's Main Page "In the news" section |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
 
@@ -82,6 +83,10 @@ mcporter call wikipedia links --args '{"title": "Tyrannosaurus", "limit": 30}'
 # Daily view counts (popularity research, trending topics)
 mcporter call wikipedia pageviews --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia pageviews --args '{"title": "Python_(programming_language)", "start": "20250101", "end": "20250107"}'
+
+# Current events from Wikipedia's Main Page (today's "In the news")
+mcporter call wikipedia news
+mcporter call wikipedia news --args '{"limit": 8}'
 
 # Non-English Wikipedia
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'

@@ -12,6 +12,7 @@ import random
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from html import unescape
 from typing import Optional
 
 import requests
@@ -489,6 +490,85 @@ def pageviews(title: str, start: str = "", end: str = "", lang: str = "en") -> s
     return out
 
 
+def news(lang: str = "en", limit: int = 5) -> str:
+    """Get current events from Wikipedia's Main Page 'In the news' section.
+
+    Returns today's curated list of recent notable events from the Main
+    Page (Wikipedia's editorially-updated current-events feed). Pairs with
+    `featured_article` (today's long-form pick) and `on_this_day`
+    (historical) — `news` covers the present tense. The Main Page is
+    rendered server-side, then the 'In the news' block is parsed out of
+    the HTML so bold + linked article titles become Markdown.
+    """
+    try:
+        limit = max(1, min(int(limit), 10))
+    except (TypeError, ValueError):
+        limit = 5
+
+    params = {
+        "action": "parse",
+        "page": "Main_Page",
+        "prop": "text",
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    resp.raise_for_status()
+    data = resp.json()
+
+    if "error" in data:
+        return f"Could not fetch news for {lang}.wikipedia.org today."
+
+    html = data.get("parse", {}).get("text", {}).get("*", "")
+    if not html:
+        return f"No news available for {lang}.wikipedia.org today."
+
+    # The Main Page renders "In the news" as a sibling <h2> + <div> block:
+    # <h2 id="mp-itn-h2">In the news</h2>
+    # <div id="mp-itn">...<ul><li>event text with links</li>...</ul></div>
+    # Grab everything between that h2 and the next h2 in the page.
+    m = re.search(
+        r'<h2[^>]*id="mp-itn-h2"[^>]*>.*?</h2>(.*?)<h2',
+        html,
+        re.DOTALL,
+    )
+    if not m:
+        return f"No 'In the news' section found on {lang}.wikipedia.org today."
+
+    block = m.group(1)
+    items = re.findall(r"<li>(.*?)</li>", block, re.DOTALL)
+    if not items:
+        return f"No news items found on {lang}.wikipedia.org today."
+
+    sample = items[:limit]
+    out = "**In the news:**\n\n"
+    for item in sample:
+        # Bold-linked article: <b><a href="/wiki/Title">Name</a></b>
+        # Render as **[Name](url)** so the main subject stands out.
+        md = re.sub(
+            r'<b>\s*<a[^>]+href="/wiki/([^"#]+)"[^>]*>([^<]+)</a>\s*</b>',
+            lambda mm: f'**[{mm.group(2)}](https://{lang}.wikipedia.org/wiki/{mm.group(1)})**',
+            item,
+        )
+        # Plain wiki links: [Name](url)
+        md = re.sub(
+            r'<a[^>]+href="/wiki/([^"#]+)"[^>]*>([^<]+)</a>',
+            lambda mm: f'[{mm.group(2)}](https://{lang}.wikipedia.org/wiki/{mm.group(1)})',
+            md,
+        )
+        # Italics (e.g. "(pictured)") stay as *text*
+        md = re.sub(r"<i>([^<]*)</i>", r"*\1*", md)
+        # Strip any remaining tags
+        md = re.sub(r"<[^>]+>", "", md)
+        md = unescape(md)
+        md = re.sub(r"\s+", " ", md).strip()
+        if md:
+            out += f"- {md}\n"
+
+    out += f"\n[Wikipedia Main Page](https://{lang}.wikipedia.org/wiki/Main_Page)"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -749,6 +829,33 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "news",
+        "description": (
+            "Get current events from Wikipedia's Main Page 'In the news' "
+            "section — the editorially-curated list of recent notable "
+            "events. Pairs with featured_article (today's long-form pick) "
+            "and on_this_day (historical) — news covers the present tense. "
+            "Bold-linked article titles become Markdown so the main "
+            "subject of each event stands out."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max events to return (default 5, max 10)",
+                    "default": 5,
+                },
+            },
+        },
+    },
 ]
 
 
@@ -775,6 +882,8 @@ def _call_tool(name: str, args: dict) -> str:
         return links(**args)
     if name == "pageviews":
         return pageviews(**args)
+    if name == "news":
+        return news(**args)
     return f"Unknown tool: {name}"
 
 
