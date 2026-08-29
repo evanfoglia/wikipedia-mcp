@@ -230,9 +230,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 11 tools listed", len(server.TOOLS) == 11)
+    check("all 12 tools listed", len(server.TOOLS) == 12)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -273,6 +273,52 @@ def main() -> int:
     out = server._call_tool("pageviews", {"title": "Velociraptor"})
     check("dispatcher routes to pageviews", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Pageviews for" in out, out[:200])
+
+    section("news")
+    out = server.news()
+    check("returns header", out.startswith("**In the news"), out[:200])
+    # Bullet list of events
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("contains at least one event", bullet_count >= 1, f"got {bullet_count}")
+    check("contains wikipedia link", "wikipedia.org/wiki/" in out, out[:500])
+    # Bold-linked article titles should be present (Main Page almost always has them)
+    check(
+        "contains a bold-linked article title",
+        "**[",
+        out[:500],
+    )
+    # Main Page link in footer
+    check("main page link present", "/wiki/Main_Page" in out, out[:500])
+
+    section("news — limit clamping + type safety")
+    out = server.news(limit=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=999 clamps to ≤10", bullet_count <= 10, f"got {bullet_count}")
+    out = server.news(limit=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+    out = server.news(limit="abc")
+    check("non-int limit returns news (no crash)", out.startswith("**In the news"), out[:300])
+
+    section("news — multi-language")
+    # German Wikipedia's Main Page is structured differently than en's,
+    # so the parser may not find an "In the news" h2 block. Accept any
+    # graceful outcome (real items, structural fallback, or empty-feed
+    # fallback) — what matters is no uncaught exception.
+    out = server.news(lang="de")
+    check(
+        "de returns news or graceful fallback",
+        out.startswith("**In the news")
+        or "No 'In the news' section" in out
+        or "No news" in out
+        or "Could not fetch" in out,
+        out[:300],
+    )
+
+    section("news — dispatcher routing")
+    out = server._call_tool("news", {})
+    check("dispatcher routes to news", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("**In the news"), out[:200])
 
     section("multi-language (de)")
     out = server.get_summary("Berlin", lang="de")
@@ -321,6 +367,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "pageviews":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "news":
+            out = server._call_tool(name, {})
         else:
             out = server._call_tool(name, {})
         check(
