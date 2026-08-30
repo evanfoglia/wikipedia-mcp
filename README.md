@@ -18,6 +18,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
 | `pageviews` | Get daily view counts for an article (popularity, trending, historical interest) |
 | `news` | Get current events from Wikipedia's Main Page "In the news" section |
+| `top_reads` | Get the most-read articles on Wikipedia for a given date |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
 
@@ -88,6 +89,10 @@ mcporter call wikipedia pageviews --args '{"title": "Python_(programming_languag
 mcporter call wikipedia news
 mcporter call wikipedia news --args '{"limit": 8}'
 
+# Top reads — most-viewed articles on a given date
+mcporter call wikipedia top_reads
+mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
+
 # Non-English Wikipedia
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
@@ -102,6 +107,7 @@ mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 Uses Wikipedia's free REST API:
 - Search: MediaWiki Action API (`/w/api.php`)
 - Summary / Random / Featured: REST API v1 (`/api/rest_v1/...`)
+- Pageviews / Top reads: Wikimedia cross-wiki metrics API (`https://wikimedia.org/api/rest_v1/metrics/pageviews/...`)
 
 No API key required. Respects Wikipedia's User-Agent policy.
 

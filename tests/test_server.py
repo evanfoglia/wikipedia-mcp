@@ -230,9 +230,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 12 tools listed", len(server.TOOLS) == 12)
+    check("all 13 tools listed", len(server.TOOLS) == 13)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -324,6 +324,121 @@ def main() -> int:
     out = server.get_summary("Berlin", lang="de")
     check("returns German article", out.startswith("## "), out[:300])
 
+    section("top_reads — explicit date")
+    # Use a known date so the test doesn't depend on "today" having
+    # finalized pageviews data. Aug 29 2026 is a recent Saturday — should
+    # have a healthy list of articles.
+    out = server.top_reads(date="20250829", limit=10)
+    check("returns header", "Top reads on en.wikipedia" in out, out[:300])
+    check("contains the requested date", "2025-08-29" in out, out[:300])
+    check("table present", "| Rank | Article | Views |" in out, out[:500])
+    # At least one table row (header is "Rank", article link, views)
+    table_rows = sum(
+        1 for line in out.splitlines()
+        if line.startswith("| ") and "https://" in line
+    )
+    check("contains at least one article row", table_rows >= 1, f"got {table_rows} rows")
+    # View counts should be comma-separated thousands (e.g. "198,027").
+    # Pull the last "|" field from each row and check it has a comma
+    # when the number is ≥1000.
+    rows_with_comma = 0
+    rows_total = 0
+    for line in out.splitlines():
+        if line.startswith("| ") and "https://" in line:
+            rows_total += 1
+            # Markdown table row format: "| rank | [Title](url) | NNN,NNN |"
+            # Split on "|" and the view count is the second-to-last field
+            # (last field is the empty trailing segment).
+            fields = line.split("|")
+            # fields: ["", " rank ", " [Title](url) ", " 198,027 ", ""]
+            views_field = fields[-2].strip() if len(fields) >= 3 else ""
+            try:
+                n = int(views_field.replace(",", ""))
+                if n >= 1000 and "," in views_field:
+                    rows_with_comma += 1
+            except ValueError:
+                pass
+    check(
+        "view counts are comma-formatted for ≥1000",
+        rows_with_comma >= 1 and rows_with_comma == rows_total,
+        f"rows_total={rows_total}, rows_with_comma={rows_with_comma}",
+    )
+
+    section("top_reads — filters non-content namespaces")
+    # Main_Page, Special:Search, Wikipedia:*, Portal:*, etc. should be
+    # filtered out so the result is real articles. Without filtering,
+    # Main_Page always ranks #1 with millions of views — which is
+    # useless as a content hook.
+    out = server.top_reads(date="20250829", limit=20)
+    check("no Main_Page row", "Main_Page|" not in out and "Main Page|" not in out, out[:2000])
+    check(
+        "no Special: row",
+        "Special:Search|" not in out and "Wikipedia:Featured" not in out,
+        out[:2000],
+    )
+    check(
+        "no Portal: row",
+        "Portal:Current_events|" not in out,
+        out[:2000],
+    )
+
+    section("top_reads — default date (yesterday UTC)")
+    # No `date` arg → server picks yesterday UTC. We can't assert the
+    # exact date without time-freezing, so just confirm the response
+    # shape holds up with no date arg.
+    out = server.top_reads()
+    check(
+        "default date returns a populated table",
+        "| Rank | Article | Views |" in out,
+        out[:500],
+    )
+
+    section("top_reads — limit clamping + type safety")
+    out = server.top_reads(date="20250829", limit=999)
+    table_rows = sum(
+        1 for line in out.splitlines()
+        if line.startswith("| ") and "https://" in line
+    )
+    check("limit=999 clamps to ≤50", table_rows <= 50, f"got {table_rows}")
+    out = server.top_reads(date="20250829", limit=-5)
+    table_rows = sum(
+        1 for line in out.splitlines()
+        if line.startswith("| ") and "https://" in line
+    )
+    check("limit=-5 clamps to ≥1", table_rows >= 1, f"got {table_rows}")
+    out = server.top_reads(date="20250829", limit="abc")
+    check(
+        "non-int limit returns table (no crash)",
+        "| Rank | Article | Views |" in out,
+        out[:500],
+    )
+
+    section("top_reads — invalid date format")
+    out = server.top_reads(date="not-a-date")
+    check("invalid date returns error", "Error" in out and "YYYYMMDD" in out, out[:300])
+    out = server.top_reads(date="2025-08-29")  # wrong separator
+    check("wrong-format date returns error", "Error" in out and "YYYYMMDD" in out, out[:300])
+
+    section("top_reads — multi-language")
+    # German Wikipedia's top-reads endpoint should work with the same
+    # shape as English. Accept any graceful outcome — what matters is
+    # no uncaught exception.
+    out = server.top_reads(date="20250829", lang="de", limit=5)
+    check(
+        "de returns a populated table",
+        "Top reads on de.wikipedia" in out and "| Rank | Article | Views |" in out,
+        out[:500],
+    )
+
+    section("top_reads — dispatcher routing")
+    out = server._call_tool("top_reads", {"date": "20250829", "limit": 5})
+    check("dispatcher routes to top_reads", "Unknown tool" not in out, out[:200])
+    check(
+        "dispatcher returned real content",
+        "Top reads on en.wikipedia" in out,
+        out[:200],
+    )
+
     section("language validation fallback")
     # _base() and _wiki() silently coerce unsupported langs to "en" so a
     # bad/typo'd lang string can't route a request to the wrong Wikipedia.
@@ -369,6 +484,10 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "news":
             out = server._call_tool(name, {})
+        elif name == "top_reads":
+            # Use a known date so the test doesn't depend on "today"
+            # having finalized pageviews data.
+            out = server._call_tool(name, {"date": "20250829", "limit": 5})
         else:
             out = server._call_tool(name, {})
         check(

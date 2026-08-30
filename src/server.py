@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.5"
+SERVER_VERSION = "1.1.6"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -569,6 +569,107 @@ def news(lang: str = "en", limit: int = 5) -> str:
     return out
 
 
+def top_reads(date: str = "", limit: int = 10, lang: str = "en") -> str:
+    """Get the most-read articles on Wikipedia for a given date.
+
+    Uses Wikimedia's top-pageviews endpoint (all-access, daily) to
+    return the top-N most-viewed articles on a language Wikipedia for a
+    single day. Default date is yesterday UTC — today's data is
+    typically not yet finalized, so defaulting to yesterday reliably
+    returns a populated list.
+
+    Filters out non-content namespaces (Main_Page, Special:Search,
+    Portal:Current_events, Wikipedia:*, Talk:*, etc.) so the result is
+    real articles only. Useful for "what's trending on Wikipedia"
+    research and daily content hooks — pairs with `pageviews` (which is
+    per-article over a range) for trending-vs-popular comparisons.
+
+    Returns a markdown table: rank, article title (linked), and view
+    count for the day.
+    """
+    lang = lang if lang in SUPPORTED_LANGS else "en"
+
+    if date == "":
+        date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y%m%d")
+
+    try:
+        dt = datetime.strptime(date, "%Y%m%d")
+    except ValueError:
+        return f"Error: date must be in YYYYMMDD format (got '{date}')"
+
+    # Pageviews API is cross-wiki; lang is in the path, not the host.
+    url = (
+        f"https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
+        f"{lang}.wikipedia/all-access/{dt.year:04d}/{dt.month:02d}/{dt.day:02d}"
+    )
+
+    try:
+        resp = _get(url)
+    except requests.RequestException as e:
+        return f"Error fetching top-reads: {e}"
+
+    if resp.status_code == 404:
+        return f"No top-reads data found for {lang}.wikipedia on {date}."
+    if resp.status_code != 200:
+        return f"Error: pageviews API returned {resp.status_code} for {date}."
+
+    data = resp.json()
+    items = data.get("items", [])
+    if not items:
+        return f"No top-reads found for {lang}.wikipedia on {date}."
+
+    all_articles = items[0].get("articles", [])
+    if not all_articles:
+        return f"No top-reads found for {lang}.wikipedia on {date}."
+
+    # Filter out non-content namespaces so users get real articles, not
+    # Wikipedia infrastructure pages. The top-reads feed always ranks
+    # Main_Page #1 (millions of daily views), Special:Search #2 (the
+    # search bar), and Wikipedia:Featured_pictures high — these are
+    # useful as raw telemetry but useless as content hooks.
+    SKIP_PREFIXES = (
+        "Main_Page", "Special:", "Wikipedia:", "Portal:", "Help:",
+        "Talk:", "Template:", "Category:", "MediaWiki:", "User:",
+        "File:", "Draft:", "Module:",
+    )
+    filtered = [
+        a for a in all_articles
+        if not any(a["article"].startswith(p) for p in SKIP_PREFIXES)
+    ]
+
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 10
+
+    sample = filtered[:limit]
+    if not sample:
+        return f"No top-reads articles found for {lang}.wikipedia on {date} (after filtering)."
+
+    pretty_date = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+    out = f"**Top reads on {lang}.wikipedia — {pretty_date}:**\n\n"
+    out += "| Rank | Article | Views |\n"
+    out += "|------|---------|------:|\n"
+
+    for art in sample:
+        title = art["article"].replace("_", " ")
+        rank = art.get("rank", "?")
+        views = art.get("views", 0)
+        slug = art["article"]
+        out += (
+            f"| {rank} | [{title}]"
+            f"(https://{lang}.wikipedia.org/wiki/{slug}) "
+            f"| {views:,} |\n"
+        )
+
+    out += (
+        f"\n[View full list]"
+        f"(https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
+        f"{lang}.wikipedia/all-access/{dt.year:04d}/{dt.month:02d}/{dt.day:02d})"
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -856,6 +957,41 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "top_reads",
+        "description": (
+            "Get the most-read articles on Wikipedia for a given date. "
+            "Uses Wikimedia's top-pageviews endpoint (all-access, daily). "
+            "Default date is yesterday UTC (today's data is typically "
+            "not yet finalized). Filters out non-content namespaces "
+            "(Main_Page, Special:Search, Portal:Current_events, "
+            "Wikipedia:*, etc.) so the result is real articles only. "
+            "Pairs with `pageviews` (per-article over a range) for "
+            "trending-vs-popular comparisons — top_reads answers "
+            "'what is everyone reading right now' while pageviews "
+            "answers 'how is this specific article trending'."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYYMMDD (default: yesterday UTC)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max articles to return (default 10, max 50)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+        },
+    },
 ]
 
 
@@ -884,6 +1020,8 @@ def _call_tool(name: str, args: dict) -> str:
         return pageviews(**args)
     if name == "news":
         return news(**args)
+    if name == "top_reads":
+        return top_reads(**args)
     return f"Unknown tool: {name}"
 
 
