@@ -230,9 +230,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 13 tools listed", len(server.TOOLS) == 13)
+    check("all 14 tools listed", len(server.TOOLS) == 14)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -439,6 +439,29 @@ def main() -> int:
         out[:200],
     )
 
+    section("image")
+    out = server.image("Tyrannosaurus")
+    check("returns title", "Tyrannosaurus" in out, out[:300])
+    check("lead image header present", "Lead Image" in out, out[:300])
+    check("thumbnail URL present", "Thumbnail" in out and "upload.wikimedia.org" in out, out[:500])
+    check("original URL present", "Original" in out and "upload.wikimedia.org" in out, out[:500])
+    check("wikipedia link", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+    check("includes markdown image tag", "![Tyrannosaurus](" in out, out[:500])
+
+    section("image — missing article")
+    out = server.image("ThisArticleDoesNotExist12345")
+    check("404 message", "not found" in out, out[:300])
+
+    section("image — multi-language")
+    out = server.image("Berlin", lang="de")
+    check("de returns image data", "Berlin" in out, out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("image — dispatcher routing")
+    out = server._call_tool("image", {"title": "Velociraptor"})
+    check("dispatcher routes to image", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Lead Image" in out, out[:200])
+
     section("language validation fallback")
     # _base() and _wiki() silently coerce unsupported langs to "en" so a
     # bad/typo'd lang string can't route a request to the wrong Wikipedia.
@@ -488,6 +511,8 @@ def main() -> int:
             # Use a known date so the test doesn't depend on "today"
             # having finalized pageviews data.
             out = server._call_tool(name, {"date": "20250829", "limit": 5})
+        elif name == "image":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         else:
             out = server._call_tool(name, {})
         check(

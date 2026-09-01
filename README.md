@@ -19,6 +19,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `pageviews` | Get daily view counts for an article (popularity, trending, historical interest) |
 | `news` | Get current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Get the most-read articles on Wikipedia for a given date |
+| `image` | Get just the lead image (thumbnail + original URLs) for an article, no summary text |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
 
@@ -92,6 +93,10 @@ mcporter call wikipedia news --args '{"limit": 8}'
 # Top reads — most-viewed articles on a given date
 mcporter call wikipedia top_reads
 mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
+
+# Lead image — thumbnail + original URLs for an article (no text)
+mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia image --args '{"title": "Tyrannosaurus", "lang": "de"}'
 
 # Non-English Wikipedia
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
