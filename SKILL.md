@@ -25,6 +25,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `pageviews` | Daily view counts for an article (popularity research, trending topics) |
 | `news` | Current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Most-read articles on Wikipedia for a given date (trending discovery) |
+| `image` | Lead image for an article — thumbnail + original URLs, no summary text |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
 
@@ -91,6 +92,7 @@ mcporter call wikipedia news
 mcporter call wikipedia news --args '{"limit": 8}'
 mcporter call wikipedia top_reads
 mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
+mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
 
@@ -114,6 +116,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `pageviews` returns daily view counts for an article over a date range (default last 7 days) — popularity research, trending topics, historical interest spikes. Uses Wikimedia's pageviews REST API.
 - `news` returns today's editorially-curated current events from Wikipedia's Main Page "In the news" block — pairs with featured_article (today's long-form) and on_this_day (historical) for a full "today in Wikipedia" content hook
 - `top_reads` returns the most-viewed articles on Wikipedia for a given date (default yesterday UTC) — answers "what is everyone reading right now" while `pageviews` answers "how is this specific article trending". Filters out Main_Page, Special:Search, Portal:Current_events, etc. so the result is real articles only.
+- `image` returns the article's lead image as URLs (300px thumbnail + full-size original) without summary prose — useful for embedding the image elsewhere (cards, slide decks, Telegram hero images). `summary` embeds the thumbnail inline; `image` exposes both URLs separately.
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub

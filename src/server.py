@@ -292,6 +292,56 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y/%m/%d")
 
 
+def image(title: str, lang: str = "en") -> str:
+    """Get just the lead image for a Wikipedia article (no summary text).
+
+    Returns both the 300px thumbnail URL and the full-resolution
+    original URL from Wikipedia's REST summary endpoint. Useful when
+    you want the article's image for embedding elsewhere (cards,
+    Telegram posts, slide decks, README hero images) without the
+    surrounding summary text — `summary` embeds the thumbnail inline,
+    but exposes only one URL and bundles it with prose. `image`
+    returns both URLs separately so downstream tools can fetch /
+    display at any size.
+
+    Returns a clean "no image available" message if the article has
+    no thumbnail or original image (many lists, disambiguation pages,
+    and stub articles don't).
+    """
+    resp = _get(f"{_base(lang)}/page/summary/{_slug(title)}")
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+
+    title_out = data.get("title", title)
+    thumb = (
+        data.get("thumbnail", {}).get("source", "")
+        if data.get("thumbnail") else ""
+    )
+    original = (
+        data.get("originalimage", {}).get("source", "")
+        if data.get("originalimage") else ""
+    )
+    desktop_url = (
+        data.get("content_urls", {}).get("desktop", {}).get("page", "#")
+    )
+
+    if not thumb and not original:
+        return (
+            f"No image available for '{title_out}' on {lang}.wikipedia."
+        )
+
+    out = f"## {title_out} — Lead Image\n\n"
+    if original:
+        out += f"**Original (full size):** {original}\n\n"
+    if thumb:
+        out += f"**Thumbnail (300px):** {thumb}\n\n"
+    out += f"![{title_out}]({original or thumb})\n\n"
+    out += f"[Read more →]({desktop_url})"
+    return out
+
+
 def links(title: str, limit: int = 20, lang: str = "en") -> str:
     """List Wikipedia article links (outgoing internal links) from a page.
 
@@ -958,6 +1008,37 @@ TOOLS = [
         },
     },
     {
+        "name": "image",
+        "description": (
+            "Get just the lead image for a Wikipedia article — "
+            "returns both the 300px thumbnail URL and the full-resolution "
+            "original URL from Wikipedia's REST summary endpoint. "
+            "Useful when you want the article's image for embedding "
+            "elsewhere (cards, Telegram posts, slide decks, README "
+            "hero images) without the surrounding summary text. "
+            "`summary` embeds the thumbnail inline; `image` exposes "
+            "both URLs separately so downstream tools can fetch / "
+            "display at any size. Returns a clean message if the "
+            "article has no image."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "top_reads",
         "description": (
             "Get the most-read articles on Wikipedia for a given date. "
@@ -1022,6 +1103,8 @@ def _call_tool(name: str, args: dict) -> str:
         return news(**args)
     if name == "top_reads":
         return top_reads(**args)
+    if name == "image":
+        return image(**args)
     return f"Unknown tool: {name}"
 
 
