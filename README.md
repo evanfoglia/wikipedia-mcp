@@ -20,8 +20,9 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `news` | Get current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Get the most-read articles on Wikipedia for a given date |
 | `image` | Get just the lead image (thumbnail + original URLs) for an article, no summary text |
+| `quote` | Get a random notable quote from a curated list of famous authors |
 
-All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
+All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
 ## Setup
 
@@ -97,6 +98,10 @@ mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
 # Lead image — thumbnail + original URLs for an article (no text)
 mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia image --args '{"title": "Tyrannosaurus", "lang": "de"}'
+
+# Random notable quote (curated list of famous authors)
+mcporter call wikipedia quote
+mcporter call wikipedia quote --args '{"lang": "de"}'  # lang accepted, currently English-only
 
 # Non-English Wikipedia
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'

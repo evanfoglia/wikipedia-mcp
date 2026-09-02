@@ -230,9 +230,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 14 tools listed", len(server.TOOLS) == 14)
+    check("all 15 tools listed", len(server.TOOLS) == 15)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -461,6 +461,49 @@ def main() -> int:
     out = server._call_tool("image", {"title": "Velociraptor"})
     check("dispatcher routes to image", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Lead Image" in out, out[:200])
+
+    section("quote")
+    out = server.quote()
+    check("returns a quote", out.startswith("💬"), out[:200])
+    check("contains quoted text", '"' in out, out[:200])
+    check("contains attribution", "— *" in out, out[:300])
+    # The curated list has at least 20 entries — verify we're picking from
+    # a non-trivial pool (not a single hardcoded quote).
+    check("starts with emoji marker", out.startswith("💬"), out[:200])
+
+    section("quote — random distribution")
+    # Call multiple times; with 23+ entries we should see at least 2
+    # distinct outputs across 10 draws (probability of seeing all same
+    # is ~1/23^9 — vanishingly small).
+    seen = set()
+    for _ in range(10):
+        seen.add(server.quote())
+    check("returns different quotes across calls (curated list > 1 entry)", len(seen) >= 2, f"got {len(seen)} unique quotes")
+
+    section("quote — every entry is well-formed")
+    # Curation quality check: every (author, quote) in FAMOUS_QUOTES must
+    # be a real tuple with both fields populated. This catches accidental
+    # truncation of the curated list (e.g. leaving a trailing comma that
+    # makes one entry a string instead of a tuple).
+    for i, entry in enumerate(server.FAMOUS_QUOTES):
+        check(
+            f"FAMOUS_QUOTES[{i}] is a (author, quote) tuple",
+            isinstance(entry, tuple) and len(entry) == 2 and all(isinstance(s, str) and s for s in entry),
+            repr(entry)[:100],
+        )
+
+    section("quote — lang parameter accepted")
+    # `lang` is accepted for API consistency but currently English-only.
+    # Verify that non-English values don't crash and still return a quote.
+    out = server.quote(lang="de")
+    check("non-English lang still returns a quote", out.startswith("💬"), out[:200])
+    out = server.quote(lang="Klingon")
+    check("invalid lang still returns a quote (no crash)", out.startswith("💬"), out[:200])
+
+    section("quote — dispatcher routing")
+    out = server._call_tool("quote", {})
+    check("dispatcher routes to quote", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("💬"), out[:200])
 
     section("language validation fallback")
     # _base() and _wiki() silently coerce unsupported langs to "en" so a
