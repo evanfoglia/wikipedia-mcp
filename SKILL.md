@@ -1,6 +1,6 @@
 ---
 name: wikipedia
-version: 1.1.9
+version: 1.1.10
 description: Access Wikipedia via MCP — search articles, get summaries, random facts, dinosaur facts, today's featured article, today's historical events, article categories, outgoing links, view counts, current news, and most-read articles. Multi-language support (10 wikis). Great for research, content hooks, and general knowledge lookups.
 ---
 
@@ -26,6 +26,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `news` | Current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Most-read articles on Wikipedia for a given date (trending discovery) |
 | `image` | Lead image for an article — thumbnail + original URLs, no summary text |
+| `media_list` | All media (images, videos, audio) in an article — full inventory with type, caption, and thumbnail |
 | `quote` | Random notable quote from a curated list of famous authors |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
@@ -94,6 +95,8 @@ mcporter call wikipedia news --args '{"limit": 8}'
 mcporter call wikipedia top_reads
 mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
 mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus", "limit": 50}'
 mcporter call wikipedia quote
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
@@ -119,6 +122,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `news` returns today's editorially-curated current events from Wikipedia's Main Page "In the news" block — pairs with featured_article (today's long-form) and on_this_day (historical) for a full "today in Wikipedia" content hook
 - `top_reads` returns the most-viewed articles on Wikipedia for a given date (default yesterday UTC) — answers "what is everyone reading right now" while `pageviews` answers "how is this specific article trending". Filters out Main_Page, Special:Search, Portal:Current_events, etc. so the result is real articles only.
 - `image` returns the article's lead image as URLs (300px thumbnail + full-size original) without summary prose — useful for embedding the image elsewhere (cards, slide decks, Telegram hero images). `summary` embeds the thumbnail inline; `image` exposes both URLs separately.
+- `media_list` returns every media item (images, videos, audio) the article uses — not just the lead thumbnail. Each entry has file title, type, caption, and thumbnail URL; lead media is marked with 🏆 so callers can skip it when they already have it via `image`. Uses Wikipedia's REST `/page/media-list` endpoint (structured JSON, no HTML parsing). Pairs with `image` (lead only) — use `image` for the headline thumbnail, `media_list` for the full inventory (gallery generation, fact-checking, slide decks, audits).
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub

@@ -230,9 +230,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 15 tools listed", len(server.TOOLS) == 15)
+    check("all 16 tools listed", len(server.TOOLS) == 16)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -505,6 +505,81 @@ def main() -> int:
     check("dispatcher routes to quote", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("💬"), out[:200])
 
+    section("media_list")
+    out = server.media_list("Tyrannosaurus")
+    check("returns header", "Media in" in out and "Tyrannosaurus" in out, out[:300])
+    check("shows total count", "total" in out, out[:300])
+    check("lists File: entries", "File:" in out, out[:500])
+    check("includes Type: field", "Type: image" in out or "Type: video" in out, out[:500])
+    check("includes Thumbnail: field", "Thumbnail:" in out, out[:500])
+    check("thumbnail URL on upload.wikimedia.org", "upload.wikimedia.org" in out, out[:500])
+    # Lead image should be marked — every Wikipedia summary endpoint marks
+    # exactly one item as leadImage=true, so the trophy should appear at
+    # least once in the response.
+    check("lead marker present", "🏆" in out, out[:2000])
+    check("article link included", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+
+    section("media_list — limit clamping + type safety")
+    out = server.media_list("Tyrannosaurus", limit=999)
+    # Items are rendered as "- **File:...**" lines. Count those.
+    file_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- **File:")
+    )
+    check("limit=999 clamps to ≤100", file_count <= 100, f"got {file_count}")
+    out = server.media_list("Tyrannosaurus", limit=-5)
+    file_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- **File:")
+    )
+    check("limit=-5 clamps to ≥1", file_count >= 1, f"got {file_count}")
+    out = server.media_list("Tyrannosaurus", limit="abc")
+    check(
+        "non-int limit returns media (no crash)",
+        "Media in" in out and "Tyrannosaurus" in out,
+        out[:300],
+    )
+
+    section("media_list — missing article")
+    out = server.media_list("ThisArticleDoesNotExist12345")
+    check("404 message", "not found" in out, out[:300])
+
+    section("media_list — empty title")
+    # Empty title → URL becomes /page/media-list/ → Wikipedia returns 404.
+    out = server.media_list("")
+    check("empty title returns graceful 404", "not found" in out, out[:300])
+
+    section("media_list — multi-language")
+    out = server.media_list("Berlin", limit=5, lang="de")
+    check("de returns media", "Media in" in out and "Berlin" in out, out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("media_list — protocol-relative URLs upgraded")
+    # srcset entries come back as "//upload.wikimedia.org/..." which
+    # would break MCP clients resolving the URL. The tool must add the
+    # https: scheme.
+    out = server.media_list("Tyrannosaurus", limit=3)
+    # Every "Thumbnail:" line must start with "https://" (no "//" alone).
+    thumb_lines = [
+        line for line in out.splitlines() if line.startswith("  Thumbnail:")
+    ]
+    check("at least one thumbnail rendered", len(thumb_lines) >= 1, out[:1000])
+    if thumb_lines:
+        check(
+            "thumbnail URLs use https scheme (not protocol-relative)",
+            all("https://" in line for line in thumb_lines),
+            "\n".join(thumb_lines)[:500],
+        )
+
+    section("media_list — dispatcher routing")
+    out = server._call_tool("media_list", {"title": "Velociraptor", "limit": 3})
+    check("dispatcher routes to media_list", "Unknown tool" not in out, out[:200])
+    check(
+        "dispatcher returned real content",
+        "Media in" in out and "Velociraptor" in out,
+        out[:200],
+    )
+
     section("language validation fallback")
     # _base() and _wiki() silently coerce unsupported langs to "en" so a
     # bad/typo'd lang string can't route a request to the wrong Wikipedia.
@@ -556,6 +631,8 @@ def main() -> int:
             out = server._call_tool(name, {"date": "20250829", "limit": 5})
         elif name == "image":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "media_list":
+            out = server._call_tool(name, {"title": "Velociraptor", "limit": 3})
         else:
             out = server._call_tool(name, {})
         check(

@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.10"
+SERVER_VERSION = "1.1.11"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -754,6 +754,80 @@ def top_reads(date: str = "", limit: int = 10, lang: str = "en") -> str:
     return out
 
 
+def media_list(title: str, limit: int = 25, lang: str = "en") -> str:
+    """List all media (images, videos, audio) used in a Wikipedia article.
+
+    Returns a structured markdown list of every media item the article
+    uses — not just the lead thumbnail. Each entry shows the media type
+    (image / video / audio), the file title on Wikimedia Commons, an
+    optional caption (plain text, with HTML stripped), and the
+    thumbnail URL at the smallest scale. Lead media is marked with a
+    trophy so callers can skip it when they already have it via `image`.
+
+    Complements `image` (which returns only the lead thumbnail + original
+    URLs in a text block) — `media_list` is for callers that want the
+    full inventory: gallery generation, fact-checking images cited in
+    an article, slide decks, content audits. Uses Wikipedia's REST
+    `/page/media-list` endpoint which returns structured JSON, no HTML
+    parsing required.
+
+    `limit` clamps the number of items returned (default 25, max 100).
+    Wikipedia articles can easily have 50+ media items — raise the limit
+    if you need the full set, or keep the default to keep responses
+    concise.
+    """
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        limit = 25
+    resp = _get(f"{_base(lang)}/page/media-list/{_slug(title)}")
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    items = data.get("items", [])
+    if not items:
+        return f"No media found for '{title}' on {lang}.wikipedia."
+
+    sample = items[:limit]
+    out = (
+        f"**Media in \"{title}\":** "
+        f"({len(items)} total, showing {len(sample)})\n\n"
+    )
+    for item in sample:
+        file_title = item.get("title", "Unknown")
+        media_type = item.get("type", "media")
+        is_lead = item.get("leadImage", False)
+        lead_marker = " 🏆 (lead)" if is_lead else ""
+        caption = ""
+        cap = item.get("caption")
+        if isinstance(cap, dict):
+            caption = (cap.get("text") or "").strip()
+        elif isinstance(cap, str):
+            caption = cap.strip()
+        srcset = item.get("srcset", []) or []
+        thumb_url = ""
+        if srcset:
+            thumb_url = srcset[0].get("src", "")
+            # Protocol-relative URLs ("//upload.wikimedia.org/...") need
+            # an explicit scheme so MCP clients can resolve them.
+            if thumb_url.startswith("//"):
+                thumb_url = "https:" + thumb_url
+
+        out += f"- **{file_title}**{lead_marker}\n"
+        out += f"  Type: {media_type}\n"
+        if caption:
+            cap_display = caption[:200] + ("..." if len(caption) > 200 else "")
+            out += f"  Caption: {cap_display}\n"
+        if thumb_url:
+            out += f"  Thumbnail: {thumb_url}\n"
+        out += "\n"
+
+    desktop_url = f"https://{lang}.wikipedia.org/wiki/{_slug(title)}"
+    out += f"[View article]({desktop_url})"
+    return out
+
+
 def quote(lang: str = "en") -> str:
     """Get a random notable quote from a curated list of famous authors.
 
@@ -1136,6 +1210,42 @@ TOOLS = [
         },
     },
     {
+        "name": "media_list",
+        "description": (
+            "List all media (images, videos, audio) used in a Wikipedia "
+            "article — not just the lead thumbnail. Returns a structured "
+            "markdown list: file title, type (image/video/audio), caption, "
+            "and thumbnail URL. Lead media is marked so callers can skip "
+            "it when they already have it via `image`. Uses Wikipedia's "
+            "REST `/page/media-list` endpoint (structured JSON, no HTML "
+            "parsing). Pairs with `image` (lead only) — use `image` for "
+            "the headline thumbnail, `media_list` for the full inventory "
+            "(gallery generation, fact-checking, slide decks, audits). "
+            "`limit` clamps the number of items (default 25, max 100)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max media items to return (default 25, max 100)",
+                    "default": 25,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "quote",
         "description": (
             "Get a random notable quote from a curated list of famous "
@@ -1193,6 +1303,8 @@ def _call_tool(name: str, args: dict) -> str:
         return top_reads(**args)
     if name == "image":
         return image(**args)
+    if name == "media_list":
+        return media_list(**args)
     if name == "quote":
         return quote(**args)
     return f"Unknown tool: {name}"
