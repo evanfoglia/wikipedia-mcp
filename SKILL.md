@@ -26,8 +26,9 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `news` | Current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Most-read articles on Wikipedia for a given date (trending discovery) |
 | `image` | Lead image for an article — thumbnail + original URLs, no summary text |
+| `quote` | Random notable quote from a curated list of famous authors |
 
-All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`).
+All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
 ## Installation
 
@@ -93,6 +94,7 @@ mcporter call wikipedia news --args '{"limit": 8}'
 mcporter call wikipedia top_reads
 mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
 mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia quote
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
 
