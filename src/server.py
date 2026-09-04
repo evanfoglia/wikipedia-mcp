@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.11"
+SERVER_VERSION = "1.1.12"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -271,6 +271,100 @@ def article_extract(title: str, lang: str = "en") -> str:
         return f"No extract available for '{title_out}'."
     desktop_url = f"https://{lang}.wikipedia.org/wiki/{_slug(title_out)}"
     return f"## {title_out}\n\n{extract}\n\n[Read more →]({desktop_url})"
+
+
+def article_sections(title: str, lang: str = "en") -> str:
+    """Get the table of contents (section headings) for a Wikipedia article.
+
+    Returns the structured section list from Wikipedia's parse API —
+    section number, heading text, nesting level, and anchor. Useful for
+    navigating long articles before committing to reading the whole body
+    via `article_extract`. Major articles (e.g. "World War II",
+    "Tyrannosaurus") can have 50KB+ of plain-text body; `article_sections`
+    gives you the TOC in a few hundred bytes so you can pick what to read
+    next. Sections are rendered as a numbered, indented markdown list —
+    indentation maps to Wikipedia's heading hierarchy (h2 = no indent,
+    h3 = 2 spaces, h4 = 4 spaces, etc.) so the structure is visible
+    without a tree widget.
+
+    Pairs naturally with `article_extract` (full body) and `summary`
+    (lead + thumbnail): use `summary` for the headline, `article_sections`
+    to browse the structure, `article_extract` when you want the full
+    read.
+    """
+    params = {
+        "action": "parse",
+        "page": title,
+        "prop": "sections",
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+
+    # MediaWiki parse API returns 200 OK with an `error` block for
+    # non-existent pages (code "missingtitle") rather than a 404 HTTP
+    # status. The error info wording varies ("The page you specified
+    # doesn't exist.", "Bad title ...", "missingtitle"), so check for
+    # the common "not found" indicators rather than relying on one
+    # string match. Surface the same friendly message as
+    # `summary` / `article_extract` / `categories` / `links`.
+    if "error" in data:
+        info = data.get("error", {}).get("info", "")
+        code = data.get("error", {}).get("code", "")
+        info_lc = info.lower()
+        if (
+            "missing" in info_lc
+            or "doesn't exist" in info_lc
+            or "does not exist" in info_lc
+            or "bad title" in info_lc
+            or code == "missingtitle"
+        ):
+            return f"Article '{title}' not found on Wikipedia."
+        return f"Could not fetch sections for '{title}': {info}"
+
+    parse = data.get("parse") or {}
+    title_out = parse.get("title", title) or title
+    sections = parse.get("sections") or []
+
+    if not sections:
+        # Articles with no section structure (rare — stubs, redirects)
+        # shouldn't be reported as errors; just acknowledge cleanly.
+        return (
+            f"**Sections in \"{title_out}\":**\n\n"
+            f"_(No sections found — article may be a stub or redirect.)_\n\n"
+            f"[View article]"
+            f"(https://{lang}.wikipedia.org/wiki/{_slug(title_out)})"
+        )
+
+    # toclevel is the visual hierarchy in Wikipedia's rendered TOC
+    # (1 = top-level h2, 2 = h3, etc.). Indent by 2 spaces per level
+    # minus 1 so top-level entries are flush-left.
+    out = f"**Sections in \"{title_out}\":** ({len(sections)} total)\n\n"
+    for sec in sections:
+        line = (sec.get("line") or "").strip()
+        if not line:
+            continue
+        toclevel = sec.get("toclevel", 1) or 1
+        try:
+            toclevel = max(1, min(int(toclevel), 4))
+        except (TypeError, ValueError):
+            toclevel = 1
+        indent = "  " * (toclevel - 1)
+        number = sec.get("number", "")
+        if number:
+            out += f"{indent}{number}. {line}\n"
+        else:
+            out += f"{indent}- {line}\n"
+
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(title_out)})"
+    )
+    return out
 
 
 def featured_article(lang: str = "en") -> str:
@@ -965,6 +1059,19 @@ TOOLS = [
             "Returns plain text (no HTML). Complements `summary`: use it "
             "when the summary is too brief and you want a fuller reading."
         ),
+    },
+    {
+        "name": "article_sections",
+        "description": (
+            "Get the table of contents (section headings) for a Wikipedia "
+            "article — section number, heading text, and nesting level. "
+            "Useful for navigating long articles before committing to the "
+            "full body via `article_extract`. Major articles can have "
+            "50KB+ of body text; `article_sections` gives the TOC in a "
+            "compact numbered list so callers can pick what to read next. "
+            "Pairs with `summary` (lead), `article_sections` (structure), "
+            "`article_extract` (full body)."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1289,6 +1396,8 @@ def _call_tool(name: str, args: dict) -> str:
         return featured_article(**args)
     if name == "article_extract":
         return article_extract(**args)
+    if name == "article_sections":
+        return article_sections(**args)
     if name == "on_this_day":
         return on_this_day(**args)
     if name == "categories":

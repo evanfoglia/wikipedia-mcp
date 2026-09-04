@@ -19,6 +19,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `dino_fact` | Dinosaur/prehistory fact (specific species or random) |
 | `featured_article` | Today's Wikipedia Featured Article |
 | `article_extract` | Full plain-text article extract by title (longer than `summary`) |
+| `article_sections` | Table of contents (section headings) for an article — navigate before reading the full body |
 | `on_this_day` | Historical events that happened on today's date |
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
@@ -82,6 +83,7 @@ mcporter call wikipedia dino_fact
 mcporter call wikipedia did_you_know
 mcporter call wikipedia featured_article
 mcporter call wikipedia article_extract --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia article_sections --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia on_this_day
 mcporter call wikipedia on_this_day --args '{"count": 8}'
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus"}'
@@ -115,6 +117,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
 - `article_extract` returns the full plain-text article (vs `summary`'s short extract + thumbnail) — use when you need more than a summary
+- `article_sections` returns the article's table of contents — section number, heading text, and nesting level — so callers can navigate long articles (50KB+ body) by picking the section they want before committing to `article_extract`. Pairs with `summary` (lead), `article_sections` (structure), `article_extract` (full body).
 - `on_this_day` returns historical events for today's UTC date from Wikipedia's "On This Day" feed — pairs with featured_article for daily "today in history" content hooks
 - `categories` returns Wikipedia categories for an article (hidden/maintenance categories filtered) — useful for taxonomy-based discovery beyond text search
 - `links` returns the article's outgoing Wikipedia links (main namespace only) — graph-style discovery showing which genera, people, and concepts an article references

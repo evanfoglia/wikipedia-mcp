@@ -135,6 +135,55 @@ def main() -> int:
     check("dispatcher routes to article_extract", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "## " in out, out[:200])
 
+    section("article_sections")
+    out = server.article_sections("Tyrannosaurus")
+    check("returns header", out.startswith("**Sections in"), out[:200])
+    check("shows total count", "total" in out, out[:300])
+    # Bulleted/numbered list of section headings — every line that
+    # starts with whitespace+number or whitespace+dash is a section.
+    bullet_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("  ") or line.startswith("1.")
+    )
+    check("contains at least 3 sections", bullet_count >= 3, f"got {bullet_count}")
+    check("article link present", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+    # Tyrannosaurus's TOC reliably contains a "Description" or "Discovery"
+    # section; either surfaces from the parse API.
+    check(
+        "includes an expected section",
+        any(name in out for name in ("Description", "Discovery", "History", "Classification", "Paleobiology")),
+        out[:2000],
+    )
+
+    section("article_sections — uses section numbering")
+    # The parse API returns numeric section indices like "1", "1.1", etc.
+    # We render them as "1. Heading", "1.1 Heading". Confirm at least
+    # one line starts with a bare digit + period.
+    out = server.article_sections("Tyrannosaurus")
+    numbered = sum(
+        1 for line in out.splitlines()
+        if len(line) > 2 and line[0].isdigit() and line[1:3] in (". ", ".\t")
+    )
+    check("at least one numbered section line", numbered >= 1, f"got {numbered}")
+
+    section("article_sections — missing article")
+    out = server.article_sections("ThisArticleDoesNotExist12345")
+    check("404 message", "not found" in out, out[:300])
+
+    section("article_sections — input edge cases")
+    out = server.article_sections("")
+    check("empty title returns graceful result", "not found" in out, out[:300])
+
+    section("article_sections — multi-language")
+    out = server.article_sections("Berlin", lang="de")
+    check("de returns sections", out.startswith("**Sections in"), out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("article_sections — dispatcher routing")
+    out = server._call_tool("article_sections", {"title": "Velociraptor"})
+    check("dispatcher routes to article_sections", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Sections in" in out, out[:200])
+
     section("featured_article")
     out = server.featured_article()
     check("returns markdown", out.startswith("## "), out[:200])
@@ -230,9 +279,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 16 tools listed", len(server.TOOLS) == 16)
+    check("all 17 tools listed", len(server.TOOLS) == 17)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -614,6 +663,8 @@ def main() -> int:
         elif name == "dino_fact":
             out = server._call_tool(name, {"species": ""})
         elif name == "article_extract":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "article_sections":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "on_this_day":
             out = server._call_tool(name, {})
