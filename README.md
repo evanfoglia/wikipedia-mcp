@@ -20,6 +20,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `news` | Get current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Get the most-read articles on Wikipedia for a given date |
 | `image` | Get just the lead image (thumbnail + original URLs) for an article, no summary text |
+| `media_list` | List all media (images, videos, audio) used in an article — full inventory with type, caption, and thumbnail |
 | `quote` | Get a random notable quote from a curated list of famous authors |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
@@ -99,6 +100,11 @@ mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
 mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia image --args '{"title": "Tyrannosaurus", "lang": "de"}'
 
+# Media inventory — all images/videos/audio in an article (full list, not just lead)
+mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus", "limit": 50}'
+mcporter call wikipedia media_list --args '{"title": "Berlin", "lang": "de"}'
+
 # Random notable quote (curated list of famous authors)
 mcporter call wikipedia quote
 mcporter call wikipedia quote --args '{"lang": "de"}'  # lang accepted, currently English-only
@@ -116,7 +122,7 @@ mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 
 Uses Wikipedia's free REST API:
 - Search: MediaWiki Action API (`/w/api.php`)
-- Summary / Random / Featured: REST API v1 (`/api/rest_v1/...`)
+- Summary / Random / Featured / Media-list: REST API v1 (`/api/rest_v1/...`)
 - Pageviews / Top reads: Wikimedia cross-wiki metrics API (`https://wikimedia.org/api/rest_v1/metrics/pageviews/...`)
 
 No API key required. Respects Wikipedia's User-Agent policy.
