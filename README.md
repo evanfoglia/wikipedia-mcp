@@ -13,6 +13,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `dino_fact` | Get a dino/prehistory-specific fact (specific species or random) |
 | `featured_article` | Get today's Wikipedia Featured Article |
 | `article_extract` | Get a full plain-text extract of an article (longer than `summary`) |
+| `article_sections` | Get the table of contents (section headings) for an article — useful for navigating long articles before reading the full body |
 | `on_this_day` | Get historical events that happened on today's date |
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
@@ -71,6 +72,9 @@ mcporter call wikipedia featured_article
 
 # Full plain-text article extract (vs summary)
 mcporter call wikipedia article_extract --args '{"title": "Tyrannosaurus"}'
+
+# Article table of contents — section headings (navigate before reading full body)
+mcporter call wikipedia article_sections --args '{"title": "Tyrannosaurus"}'
 
 # On this day (historical events for today)
 mcporter call wikipedia on_this_day
