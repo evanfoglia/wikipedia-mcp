@@ -524,6 +524,61 @@ def links(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def backlinks(title: str, limit: int = 20, lang: str = "en") -> str:
+    """List incoming Wikipedia links to an article (backlinks).
+
+    Returns the first N article titles that link TO the given article —
+    i.e. "what links here" / backlinks / referrer pages. Inverse of
+    `links` (which shows outgoing references). Useful for graph-style
+    discovery in the opposite direction — given "Velociraptor", see
+    which other articles reference it (cultural mentions, scientific
+    citations, comparative anatomy pages, etc.). Complements `links`
+    and `categories` for mapping an article's position in the
+    encyclopedia network. Filters to main namespace (ns=0) so
+    talk/user/etc. don't pollute the result.
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    params = {
+        "action": "query",
+        "prop": "linkshere",
+        "titles": title,
+        "lhlimit": limit,
+        "lhnamespace": 0,
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No backlinks found for '{title}'."
+
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    in_links = page.get("linkshere", [])
+    if not in_links:
+        return f"No backlinks found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    out = f"**Backlinks to \"{page_title}\":**\n\n"
+    for lnk in in_links:
+        name = lnk.get("title", "").strip()
+        if name:
+            out += f"- {name}\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+    )
+    return out
+
+
 def categories(title: str, limit: int = 20, lang: str = "en") -> str:
     """List Wikipedia categories for an article.
 
@@ -1190,6 +1245,40 @@ TOOLS = [
         },
     },
     {
+        "name": "backlinks",
+        "description": (
+            "List incoming Wikipedia links to an article — i.e. 'what "
+            "links here' / backlinks / referrer pages. Inverse of "
+            "`links`: given 'Velociraptor', see which other articles "
+            "reference it (cultural mentions, scientific citations, "
+            "comparative anatomy pages, etc.). Useful for graph-style "
+            "discovery in the reverse direction — mapping an article's "
+            "position in the encyclopedia network. Filters to main "
+            "namespace so talk/user/etc. don't pollute the result."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max backlinks to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "pageviews",
         "description": (
             "Get daily view counts for a Wikipedia article over a date range "
@@ -1404,6 +1493,8 @@ def _call_tool(name: str, args: dict) -> str:
         return categories(**args)
     if name == "links":
         return links(**args)
+    if name == "backlinks":
+        return backlinks(**args)
     if name == "pageviews":
         return pageviews(**args)
     if name == "news":

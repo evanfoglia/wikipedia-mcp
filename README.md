@@ -17,6 +17,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `on_this_day` | Get historical events that happened on today's date |
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
+| `backlinks` | List incoming Wikipedia links to an article (what links here / referrer pages — inverse of `links`) |
 | `pageviews` | Get daily view counts for an article (popularity, trending, historical interest) |
 | `news` | Get current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Get the most-read articles on Wikipedia for a given date |
