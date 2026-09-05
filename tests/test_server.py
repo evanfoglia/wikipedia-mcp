@@ -278,10 +278,47 @@ def main() -> int:
     check("dispatcher routes to links", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
+    section("backlinks")
+    out = server.backlinks("Tyrannosaurus")
+    check("returns header", out.startswith("**Backlinks to"), out[:200])
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("contains a bullet list", bullet_count >= 5, f"got {bullet_count} bullets")
+    check("article link present", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+    # Velociraptor is widely referenced — at least one referrer should surface
+    check(
+        "includes an expected referrer article",
+        any(name in out for name in ("Albertosaurus", "Allosaurus", "Cretaceous", "theropod", "Dinosaur", "Carnosauria", "Tyrannosauridae")),
+        out[:2000],
+    )
+
+    section("backlinks — limit clamping + type safety")
+    out = server.backlinks("Tyrannosaurus", limit=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=999 clamps to ≤50", bullet_count <= 50, f"got {bullet_count}")
+    out = server.backlinks("Tyrannosaurus", limit=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+    out = server.backlinks("Tyrannosaurus", limit="abc")
+    check("non-int limit returns backlinks (no crash)", out.startswith("**Backlinks to"), out[:300])
+
+    section("backlinks — missing article")
+    out = server.backlinks("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:300])
+
+    section("backlinks — multi-language")
+    out = server.backlinks("Berlin", limit=5, lang="de")
+    check("de returns backlinks", out.startswith("**Backlinks to"), out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("backlinks — dispatcher routing")
+    out = server._call_tool("backlinks", {"title": "Velociraptor"})
+    check("dispatcher routes to backlinks", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("**Backlinks to"), out[:200])
+
     section("tool registry")
-    check("all 17 tools listed", len(server.TOOLS) == 17)
+    check("all 18 tools listed", len(server.TOOLS) == 18)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "categories", "links", "backlinks", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -671,6 +708,8 @@ def main() -> int:
         elif name == "categories":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "links":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "backlinks":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "pageviews":
             out = server._call_tool(name, {"title": "Velociraptor"})
