@@ -214,6 +214,45 @@ def main() -> int:
     check("de returns events", out.startswith("**On this day"), out[:300])
     check("de wikipedia.org link", "de.wikipedia.org/wiki/" in out, out[:500])
 
+    section("deaths_on_this_day")
+    out = server.deaths_on_this_day()
+    check("returns header", out.startswith("**Deaths on this day"), out[:200])
+    check("contains at least one death", "- **" in out, out[:300])
+    check("contains Wikipedia link", "wikipedia.org/wiki/" in out, out[:500])
+
+    section("deaths_on_this_day — count clamping")
+    out = server.deaths_on_this_day(count=3)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=3 returns ≤3 deaths", bullet_count <= 3, f"got {bullet_count}")
+    out = server.deaths_on_this_day(count=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=999 clamps to ≤10", bullet_count <= 10, f"got {bullet_count}")
+    out = server.deaths_on_this_day(count=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+
+    section("deaths_on_this_day — non-int count falls back gracefully")
+    out = server.deaths_on_this_day(count="abc")
+    check(
+        "non-int count returns deaths (no crash)",
+        out.startswith("**Deaths on this day"),
+        out[:300],
+    )
+
+    section("deaths_on_this_day — multi-language")
+    out = server.deaths_on_this_day(lang="de")
+    check("de returns deaths", out.startswith("**Deaths on this day"), out[:300])
+    check("de wikipedia.org link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("deaths_on_this_day — dispatcher routing")
+    out = server._call_tool("deaths_on_this_day", {})
+    check("dispatcher routes to deaths_on_this_day", "Unknown tool" not in out, out[:200])
+    check(
+        "dispatcher returned real content",
+        out.startswith("**Deaths on this day"),
+        out[:200],
+    )
+
     section("categories")
     out = server.categories("Tyrannosaurus")
     check("returns header", out.startswith("**Categories for"), out[:200])
@@ -279,9 +318,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
     section("tool registry")
-    check("all 17 tools listed", len(server.TOOLS) == 17)
+    check("all 18 tools listed", len(server.TOOLS) == 18)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -667,6 +706,8 @@ def main() -> int:
         elif name == "article_sections":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "on_this_day":
+            out = server._call_tool(name, {})
+        elif name == "deaths_on_this_day":
             out = server._call_tool(name, {})
         elif name == "categories":
             out = server._call_tool(name, {"title": "Velociraptor"})

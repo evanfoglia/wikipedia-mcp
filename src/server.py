@@ -416,6 +416,51 @@ def on_this_day(lang: str = "en", count: int = 5) -> str:
     return out
 
 
+def deaths_on_this_day(lang: str = "en", count: int = 5) -> str:
+    """Get notable deaths that happened on today's date from Wikipedia.
+
+    Returns a random sample of deaths from Wikipedia's "On This Day" feed
+    for the current UTC date — the companion to `on_this_day`, which
+    covers events. Wikipedia exposes these as separate endpoints, so this
+    tool queries `/feed/onthisday/deaths/{MM/DD}` directly to get the
+    deaths subset rather than scraping the events feed.
+
+    Useful for "in memoriam" content hooks, obituary-style social posts,
+    newsletter intros, and any place where the "who died today in
+    history" framing adds weight. Pairs naturally with `on_this_day`
+    (events) and `featured_article` (today's long-form pick) for a full
+    "today in Wikipedia" daily digest.
+    """
+    try:
+        count = max(1, min(int(count), 10))
+    except (TypeError, ValueError):
+        count = 5
+    today_mm_dd = datetime.now(timezone.utc).strftime("%m/%d")
+    resp = _get(f"{_base(lang)}/feed/onthisday/deaths/{today_mm_dd}")
+    if resp.status_code == 404:
+        return f"No 'deaths on this day' available for {lang}.wikipedia.org today."
+    resp.raise_for_status()
+    deaths = resp.json().get("deaths", [])
+    if not deaths:
+        return f"No notable deaths found for today on {lang}.wikipedia.org."
+
+    sample = random.sample(deaths, min(count, len(deaths)))
+    out = "**Deaths on this day:**\n\n"
+    for entry in sample:
+        year = entry.get("year", "?")
+        text = _strip_html(entry.get("text", ""))
+        out += f"- **{year}** — {text}\n"
+        pages = entry.get("pages", [])
+        if pages:
+            page_title = pages[0].get("title", "")
+            if page_title:
+                out += (
+                    f"  [Read on Wikipedia]"
+                    f"(https://{lang}.wikipedia.org/wiki/{page_title})\n"
+                )
+    return out
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y/%m/%d")
 
@@ -1130,6 +1175,34 @@ TOOLS = [
         },
     },
     {
+        "name": "deaths_on_this_day",
+        "description": (
+            "Get notable deaths that happened on today's date (UTC) from "
+            "Wikipedia's 'On This Day' feed — the deaths-only companion "
+            "to `on_this_day` (which returns events). Useful for "
+            "'in memoriam' content hooks, obituary-style social posts, "
+            "and newsletter intros. Pairs with `on_this_day` (events) "
+            "and `featured_article` (today's long-form pick) for a full "
+            "daily 'today in Wikipedia' digest."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of deaths to return (default 5, max 10)",
+                    "default": 5,
+                },
+            },
+        },
+    },
+    {
         "name": "categories",
         "description": (
             "List Wikipedia categories an article belongs to. Useful for "
@@ -1400,6 +1473,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_sections(**args)
     if name == "on_this_day":
         return on_this_day(**args)
+    if name == "deaths_on_this_day":
+        return deaths_on_this_day(**args)
     if name == "categories":
         return categories(**args)
     if name == "links":
