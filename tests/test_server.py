@@ -837,6 +837,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "translations":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "revisions":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "pageviews":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "news":
