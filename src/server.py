@@ -416,6 +416,51 @@ def on_this_day(lang: str = "en", count: int = 5) -> str:
     return out
 
 
+def deaths_on_this_day(lang: str = "en", count: int = 5) -> str:
+    """Get notable deaths that happened on today's date from Wikipedia.
+
+    Returns a random sample of deaths from Wikipedia's "On This Day" feed
+    for the current UTC date — the companion to `on_this_day`, which
+    covers events. Wikipedia exposes these as separate endpoints, so this
+    tool queries `/feed/onthisday/deaths/{MM/DD}` directly to get the
+    deaths subset rather than scraping the events feed.
+
+    Useful for "in memoriam" content hooks, obituary-style social posts,
+    newsletter intros, and any place where the "who died today in
+    history" framing adds weight. Pairs naturally with `on_this_day`
+    (events) and `featured_article` (today's long-form pick) for a full
+    "today in Wikipedia" daily digest.
+    """
+    try:
+        count = max(1, min(int(count), 10))
+    except (TypeError, ValueError):
+        count = 5
+    today_mm_dd = datetime.now(timezone.utc).strftime("%m/%d")
+    resp = _get(f"{_base(lang)}/feed/onthisday/deaths/{today_mm_dd}")
+    if resp.status_code == 404:
+        return f"No 'deaths on this day' available for {lang}.wikipedia.org today."
+    resp.raise_for_status()
+    deaths = resp.json().get("deaths", [])
+    if not deaths:
+        return f"No notable deaths found for today on {lang}.wikipedia.org."
+
+    sample = random.sample(deaths, min(count, len(deaths)))
+    out = "**Deaths on this day:**\n\n"
+    for entry in sample:
+        year = entry.get("year", "?")
+        text = _strip_html(entry.get("text", ""))
+        out += f"- **{year}** — {text}\n"
+        pages = entry.get("pages", [])
+        if pages:
+            page_title = pages[0].get("title", "")
+            if page_title:
+                out += (
+                    f"  [Read on Wikipedia]"
+                    f"(https://{lang}.wikipedia.org/wiki/{page_title})\n"
+                )
+    return out
+
+
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y/%m/%d")
 
@@ -524,6 +569,61 @@ def links(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def backlinks(title: str, limit: int = 20, lang: str = "en") -> str:
+    """List incoming Wikipedia links to an article (backlinks).
+
+    Returns the first N article titles that link TO the given article —
+    i.e. "what links here" / backlinks / referrer pages. Inverse of
+    `links` (which shows outgoing references). Useful for graph-style
+    discovery in the opposite direction — given "Velociraptor", see
+    which other articles reference it (cultural mentions, scientific
+    citations, comparative anatomy pages, etc.). Complements `links`
+    and `categories` for mapping an article's position in the
+    encyclopedia network. Filters to main namespace (ns=0) so
+    talk/user/etc. don't pollute the result.
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    params = {
+        "action": "query",
+        "prop": "linkshere",
+        "titles": title,
+        "lhlimit": limit,
+        "lhnamespace": 0,
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No backlinks found for '{title}'."
+
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    in_links = page.get("linkshere", [])
+    if not in_links:
+        return f"No backlinks found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    out = f"**Backlinks to \"{page_title}\":**\n\n"
+    for lnk in in_links:
+        name = lnk.get("title", "").strip()
+        if name:
+            out += f"- {name}\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+    )
+    return out
+
+
 def categories(title: str, limit: int = 20, lang: str = "en") -> str:
     """List Wikipedia categories for an article.
 
@@ -571,70 +671,6 @@ def categories(title: str, limit: int = 20, lang: str = "en") -> str:
         name = cat.get("title", "").replace("Category:", "", 1)
         if name:
             out += f"- {name}\n"
-    out += (
-        f"\n[View article]"
-        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
-    )
-    return out
-
-
-def translations(title: str, limit: int = 30, lang: str = "en") -> str:
-    """List all language versions of a Wikipedia article (langlinks).
-
-    Returns the other-language editions of the article that Wikipedia
-    knows about — e.g. for 'Tyrannosaurus' (en), returns de/fr/es/ja/zh
-    titles where the equivalent article exists. Complements the
-    one-way `lang` parameter used by the other tools: every tool can
-    query a single language, but only `translations` reveals the
-    article's full language coverage so callers can pick a target
-    language to fetch next.
-
-    Useful for translation research (which languages have full
-    coverage vs. stubs), cross-language content sourcing, and
-    language-coverage analysis. Uses Wikipedia's `prop=langlinks`
-    API; the response is filtered to real articles (no redirects).
-    `limit` clamps the number of entries (default 30, max 100) —
-    popular articles can have 100+ language versions.
-    """
-    try:
-        limit = max(1, min(int(limit), 100))
-    except (TypeError, ValueError):
-        limit = 30
-    params = {
-        "action": "query",
-        "prop": "langlinks",
-        "titles": title,
-        "lllimit": limit,
-        "format": "json",
-        "origin": "*",
-    }
-    resp = _get(_wiki(lang), params=params)
-    if resp.status_code == 404:
-        return f"Article '{title}' not found on Wikipedia."
-    resp.raise_for_status()
-    data = resp.json()
-    pages = data.get("query", {}).get("pages", {})
-    if not pages:
-        return f"No translations found for '{title}'."
-
-    page = next(iter(pages.values()))
-    if page.get("missing") is not None:
-        return f"Article '{title}' not found on Wikipedia."
-    ll = page.get("langlinks", [])
-    if not ll:
-        return f"No other-language versions found for '{page.get('title', title)}'."
-
-    page_title = page.get("title", title)
-    out = f'**Translations of "{page_title}":**\n\n'
-    for entry in ll:
-        tgt_lang = entry.get("lang", "?")
-        # MediaWiki returns the localized title under the "*" key
-        # (the legacy Action API convention); fall back to "title"
-        # for safety if a future endpoint changes shape.
-        tgt_title = (entry.get("*") or entry.get("title") or "").strip()
-        if tgt_lang and tgt_title:
-            out += f"- `{tgt_lang}`: [{tgt_title}]"
-            out += f"(https://{tgt_lang}.wikipedia.org/wiki/{_slug(tgt_title)})\n"
     out += (
         f"\n[View article]"
         f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
@@ -1194,6 +1230,34 @@ TOOLS = [
         },
     },
     {
+        "name": "deaths_on_this_day",
+        "description": (
+            "Get notable deaths that happened on today's date (UTC) from "
+            "Wikipedia's 'On This Day' feed — the deaths-only companion "
+            "to `on_this_day` (which returns events). Useful for "
+            "'in memoriam' content hooks, obituary-style social posts, "
+            "and newsletter intros. Pairs with `on_this_day` (events) "
+            "and `featured_article` (today's long-form pick) for a full "
+            "daily 'today in Wikipedia' digest."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of deaths to return (default 5, max 10)",
+                    "default": 5,
+                },
+            },
+        },
+    },
+    {
         "name": "categories",
         "description": (
             "List Wikipedia categories an article belongs to. Useful for "
@@ -1254,19 +1318,16 @@ TOOLS = [
         },
     },
     {
-        "name": "translations",
+        "name": "backlinks",
         "description": (
-            "List all language versions of a Wikipedia article (langlinks). "
-            "Returns the other-language editions the article exists in — "
-            "e.g. for 'Tyrannosaurus' (en), returns de/fr/es/ja/zh titles. "
-            "Complements the one-way `lang` parameter used by other tools: "
-            "every tool can query a single language, but only `translations` "
-            "reveals the article's full language coverage so callers can "
-            "pick a target language to fetch next. Useful for translation "
-            "research (full coverage vs. stub languages), cross-language "
-            "content sourcing, and language-coverage analysis. `limit` "
-            "clamps the number of entries (default 30, max 100) — popular "
-            "articles can have 100+ language versions."
+            "List incoming Wikipedia links to an article — i.e. 'what "
+            "links here' / backlinks / referrer pages. Inverse of "
+            "`links`: given 'Velociraptor', see which other articles "
+            "reference it (cultural mentions, scientific citations, "
+            "comparative anatomy pages, etc.). Useful for graph-style "
+            "discovery in the reverse direction — mapping an article's "
+            "position in the encyclopedia network. Filters to main "
+            "namespace so talk/user/etc. don't pollute the result."
         ),
         "inputSchema": {
             "type": "object",
@@ -1277,12 +1338,12 @@ TOOLS = [
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Max language entries to return (default 30, max 100)",
-                    "default": 30,
+                    "description": "Max backlinks to return (default 20, max 50)",
+                    "default": 20,
                 },
                 "lang": {
                     "type": "string",
-                    "description": "Wikipedia language code to query from (default 'en')",
+                    "description": "Wikipedia language code (default 'en')",
                     "default": "en",
                     "enum": list(SUPPORTED_LANGS),
                 },
@@ -1501,12 +1562,14 @@ def _call_tool(name: str, args: dict) -> str:
         return article_sections(**args)
     if name == "on_this_day":
         return on_this_day(**args)
+    if name == "deaths_on_this_day":
+        return deaths_on_this_day(**args)
     if name == "categories":
         return categories(**args)
     if name == "links":
         return links(**args)
-    if name == "translations":
-        return translations(**args)
+    if name == "backlinks":
+        return backlinks(**args)
     if name == "pageviews":
         return pageviews(**args)
     if name == "news":
