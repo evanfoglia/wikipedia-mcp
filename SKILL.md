@@ -21,9 +21,10 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `article_extract` | Full plain-text article extract by title (longer than `summary`) |
 | `article_sections` | Table of contents (section headings) for an article — navigate before reading the full body |
 | `on_this_day` | Historical events that happened on today's date |
+| `deaths_on_this_day` | Notable deaths that happened on today's date — companion to `on_this_day` (events) |
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
-| `translations` | All language versions of an article (langlinks) — discover what languages it exists in |
+| `backlinks` | List incoming Wikipedia links to an article — what links here (inverse of `links`) |
 | `pageviews` | Daily view counts for an article (popularity research, trending topics) |
 | `news` | Current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Most-read articles on Wikipedia for a given date (trending discovery) |
@@ -87,12 +88,14 @@ mcporter call wikipedia article_extract --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia article_sections --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia on_this_day
 mcporter call wikipedia on_this_day --args '{"count": 8}'
+mcporter call wikipedia deaths_on_this_day
+mcporter call wikipedia deaths_on_this_day --args '{"count": 6}'
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus", "limit": 10}'
 mcporter call wikipedia links --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia links --args '{"title": "Tyrannosaurus", "limit": 30}'
-mcporter call wikipedia translations --args '{"title": "Tyrannosaurus"}'
-mcporter call wikipedia translations --args '{"title": "Tyrannosaurus", "limit": 10}'
+mcporter call wikipedia backlinks --args '{"title": "Velociraptor"}'
+mcporter call wikipedia backlinks --args '{"title": "Velociraptor", "limit": 30}'
 mcporter call wikipedia pageviews --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia pageviews --args '{"title": "Python_(programming_language)", "start": "20250101", "end": "20250107"}'
 mcporter call wikipedia news
@@ -122,9 +125,10 @@ Uses Wikipedia's free public REST API — no API key required.
 - `article_extract` returns the full plain-text article (vs `summary`'s short extract + thumbnail) — use when you need more than a summary
 - `article_sections` returns the article's table of contents — section number, heading text, and nesting level — so callers can navigate long articles (50KB+ body) by picking the section they want before committing to `article_extract`. Pairs with `summary` (lead), `article_sections` (structure), `article_extract` (full body).
 - `on_this_day` returns historical events for today's UTC date from Wikipedia's "On This Day" feed — pairs with featured_article for daily "today in history" content hooks
+- `deaths_on_this_day` returns notable deaths for today's UTC date — the deaths-only companion to `on_this_day`. Pairs with `on_this_day` (events) and `featured_article` (today's long-form) for a full "today in Wikipedia" daily digest. Useful for "in memoriam" content hooks and obituary-style social posts.
 - `categories` returns Wikipedia categories for an article (hidden/maintenance categories filtered) — useful for taxonomy-based discovery beyond text search
 - `links` returns the article's outgoing Wikipedia links (main namespace only) — graph-style discovery showing which genera, people, and concepts an article references
-- `translations` returns all language editions of an article (langlinks) — the other-language titles that Wikipedia knows about. Complements the one-way `lang` parameter used by other tools: every tool can query a single language, but only `translations` reveals the article's full language coverage so callers can pick a target language to fetch next. Useful for translation research (full coverage vs. stub languages), cross-language content sourcing, and language-coverage analysis.
+- `backlinks` returns the article's incoming Wikipedia links (what links here) — the inverse of `links`. Shows which other articles reference this one (cultural mentions, scientific citations, comparative anatomy pages, etc.). Same main-namespace filtering.
 - `pageviews` returns daily view counts for an article over a date range (default last 7 days) — popularity research, trending topics, historical interest spikes. Uses Wikimedia's pageviews REST API.
 - `news` returns today's editorially-curated current events from Wikipedia's Main Page "In the news" block — pairs with featured_article (today's long-form) and on_this_day (historical) for a full "today in Wikipedia" content hook
 - `top_reads` returns the most-viewed articles on Wikipedia for a given date (default yesterday UTC) — answers "what is everyone reading right now" while `pageviews` answers "how is this specific article trending". Filters out Main_Page, Special:Search, Portal:Current_events, etc. so the result is real articles only.
