@@ -407,10 +407,40 @@ def main() -> int:
     check("dispatcher routes to translations", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Translations of"), out[:200])
 
+    section("revisions")
+    out = server.revisions("Tyrannosaurus", limit=3)
+    check("returns header", out.startswith('**Revision history of "Tyrannosaurus"'), out[:200])
+    check("rows have diff links", "Special:Diff/" in out, out[:500])
+    check("rows show editors", "**" in out and "bytes" in out, out[:500])
+    check("full history link", "action=history" in out, out[-200:])
+
+    section("revisions — limit clamping + type safety")
+    out = server.revisions("Tyrannosaurus", limit=999)
+    rows = [l for l in out.splitlines() if l.startswith("- `")]
+    check("limit=999 clamps to <=50", len(rows) <= 50, f"got {len(rows)}")
+    out = server.revisions("Tyrannosaurus", limit=-5)
+    rows = [l for l in out.splitlines() if l.startswith("- `")]
+    check("limit=-5 clamps to >=1", len(rows) >= 1, f"got {len(rows)}")
+    out = server.revisions("Tyrannosaurus", limit="abc")
+    check(
+        "non-int limit returns history (no crash)",
+        out.startswith("**Revision history of"),
+        out[:300],
+    )
+
+    section("revisions — missing article")
+    out = server.revisions("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:300])
+
+    section("revisions — dispatcher routing")
+    out = server._call_tool("revisions", {"title": "Velociraptor"})
+    check("dispatcher routes to revisions", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
+
     section("tool registry")
-    check("all 20 tools listed", len(server.TOOLS) == 20)
+    check("all 21 tools listed", len(server.TOOLS) == 21)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "translations", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
