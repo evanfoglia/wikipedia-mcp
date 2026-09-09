@@ -26,6 +26,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
 | `backlinks` | List incoming Wikipedia links to an article — what links here (inverse of `links`) |
 | `translations` | All language versions of an article (langlinks) — discover what languages it exists in |
+| `revisions` | Recent edit history of an article — who edited it, when, edit summaries, byte-size deltas, diff links |
 | `pageviews` | Daily view counts for an article (popularity research, trending topics) |
 | `news` | Current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Most-read articles on Wikipedia for a given date (trending discovery) |
@@ -99,6 +100,8 @@ mcporter call wikipedia backlinks --args '{"title": "Velociraptor"}'
 mcporter call wikipedia backlinks --args '{"title": "Velociraptor", "limit": 30}'
 mcporter call wikipedia translations --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia translations --args '{"title": "Tyrannosaurus", "limit": 10}'
+mcporter call wikipedia revisions --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia revisions --args '{"title": "Tyrannosaurus", "limit": 20}'
 mcporter call wikipedia pageviews --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia pageviews --args '{"title": "Python_(programming_language)", "start": "20250101", "end": "20250107"}'
 mcporter call wikipedia news
