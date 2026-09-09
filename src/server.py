@@ -678,6 +678,70 @@ def categories(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def translations(title: str, limit: int = 30, lang: str = "en") -> str:
+    """List all language versions of a Wikipedia article (langlinks).
+
+    Returns the other-language editions of the article that Wikipedia
+    knows about — e.g. for 'Tyrannosaurus' (en), returns de/fr/es/ja/zh
+    titles where the equivalent article exists. Complements the
+    one-way `lang` parameter used by the other tools: every tool can
+    query a single language, but only `translations` reveals the
+    article's full language coverage so callers can pick a target
+    language to fetch next.
+
+    Useful for translation research (which languages have full
+    coverage vs. stubs), cross-language content sourcing, and
+    language-coverage analysis. Uses Wikipedia's `prop=langlinks`
+    API; the response is filtered to real articles (no redirects).
+    `limit` clamps the number of entries (default 30, max 100) —
+    popular articles can have 100+ language versions.
+    """
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        limit = 30
+    params = {
+        "action": "query",
+        "prop": "langlinks",
+        "titles": title,
+        "lllimit": limit,
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No translations found for '{title}'."
+
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    ll = page.get("langlinks", [])
+    if not ll:
+        return f"No other-language versions found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    out = f'**Translations of "{page_title}":**\n\n'
+    for entry in ll:
+        tgt_lang = entry.get("lang", "?")
+        # MediaWiki returns the localized title under the "*" key
+        # (the legacy Action API convention); fall back to "title"
+        # for safety if a future endpoint changes shape.
+        tgt_title = (entry.get("*") or entry.get("title") or "").strip()
+        if tgt_lang and tgt_title:
+            out += f"- `{tgt_lang}`: [{tgt_title}]"
+            out += f"(https://{tgt_lang}.wikipedia.org/wiki/{_slug(tgt_title)})\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+    )
+    return out
+
+
 def pageviews(title: str, start: str = "", end: str = "", lang: str = "en") -> str:
     """Get daily view counts for a Wikipedia article over a date range.
 
@@ -1352,6 +1416,43 @@ TOOLS = [
         },
     },
     {
+        "name": "translations",
+        "description": (
+            "List all language versions of a Wikipedia article (langlinks). "
+            "Returns the other-language editions the article exists in — "
+            "e.g. for 'Tyrannosaurus' (en), returns de/fr/es/ja/zh titles. "
+            "Complements the one-way `lang` parameter used by other tools: "
+            "every tool can query a single language, but only `translations` "
+            "reveals the article's full language coverage so callers can "
+            "pick a target language to fetch next. Useful for translation "
+            "research (full coverage vs. stub languages), cross-language "
+            "content sourcing, and language-coverage analysis. `limit` "
+            "clamps the number of entries (default 30, max 100) — popular "
+            "articles can have 100+ language versions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max language entries to return (default 30, max 100)",
+                    "default": 30,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code to query from (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "pageviews",
         "description": (
             "Get daily view counts for a Wikipedia article over a date range "
@@ -1570,6 +1671,8 @@ def _call_tool(name: str, args: dict) -> str:
         return links(**args)
     if name == "backlinks":
         return backlinks(**args)
+    if name == "translations":
+        return translations(**args)
     if name == "pageviews":
         return pageviews(**args)
     if name == "news":
