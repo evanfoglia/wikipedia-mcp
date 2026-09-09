@@ -20,6 +20,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
 | `backlinks` | List incoming Wikipedia links to an article (what links here / referrer pages — inverse of `links`) |
 | `translations` | List all language versions of an article (langlinks) — discover what languages it exists in |
+| `revisions` | Show an article's recent edit history (who edited it, when, edit summaries, size deltas) with diff links |
 | `pageviews` | Get daily view counts for an article (popularity, trending, historical interest) |
 | `news` | Get current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Get the most-read articles on Wikipedia for a given date |
@@ -98,6 +99,10 @@ mcporter call wikipedia links --args '{"title": "Tyrannosaurus", "limit": 30}'
 # Translations — list all language editions of an article
 mcporter call wikipedia translations --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia translations --args '{"title": "Tyrannosaurus", "limit": 10}'
+
+# Revision history — recent edits, editors, summaries, diffs
+mcporter call wikipedia revisions --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia revisions --args '{"title": "Tyrannosaurus", "limit": 20}'
 
 # Daily view counts (popularity research, trending topics)
 mcporter call wikipedia pageviews --args '{"title": "Tyrannosaurus"}'

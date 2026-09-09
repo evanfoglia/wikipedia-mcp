@@ -742,6 +742,77 @@ def translations(title: str, limit: int = 30, lang: str = "en") -> str:
     return out
 
 
+def revisions(title: str, limit: int = 10, lang: str = "en") -> str:
+    """Show an article's recent edit history ('View history').
+
+    Returns the most recent revisions with revision id, timestamp,
+    editor, edit summary, and byte-size delta vs the previous revision.
+    Each revision links to its diff (Special:Diff/<revid>) so callers
+    can inspect exactly what changed. Useful for tracking how an
+    article evolves over time, auditing edits on a topic, or spotting
+    edit activity around current events. Complements `pageviews`
+    (popularity) with provenance (who changed what, when).
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 10
+    params = {
+        "action": "query",
+        "prop": "revisions",
+        "titles": title,
+        "rvprop": "ids|timestamp|user|comment|size|flags",
+        "rvlimit": limit,
+        "rvslots": "main",
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No revisions found for '{title}'."
+
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    revs = page.get("revisions", [])
+    if not revs:
+        return f"No revisions found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    out = f'**Revision history of "{page_title}" ({len(revs)} most recent):**\n\n'
+    # Revisions arrive newest-first; delta compares each revision against
+    # the next (older) one, so the oldest shown revision has no delta.
+    for i, rev in enumerate(revs):
+        revid = rev.get("revid", "?")
+        ts = (rev.get("timestamp") or "?")[:16].replace("T", " ")
+        user = rev.get("user", "?")
+        comment = (rev.get("comment") or "").strip() or "(no edit summary)"
+        minor = " [m]" if "minor" in rev else ""
+        size = rev.get("size")
+        delta = ""
+        if isinstance(size, int) and i + 1 < len(revs):
+            older = revs[i + 1].get("size")
+            if isinstance(older, int):
+                d = size - older
+                delta = f" ({d:+,d} bytes)"
+        diff_url = f"https://{lang}.wikipedia.org/wiki/Special:Diff/{revid}"
+        out += (
+            f"- `{ts}` — **{user}**{minor}{delta}: {comment} "
+            f"([diff]({diff_url}))\n"
+        )
+    out += (
+        f"\n[Full history]"
+        f"(https://{lang}.wikipedia.org/w/index.php"
+        f"?title={_slug(page_title)}&action=history)"
+    )
+    return out
+
+
 def pageviews(title: str, start: str = "", end: str = "", lang: str = "en") -> str:
     """Get daily view counts for a Wikipedia article over a date range.
 
@@ -1453,6 +1524,40 @@ TOOLS = [
         },
     },
     {
+        "name": "revisions",
+        "description": (
+            "Show an article's recent edit history ('View history'): "
+            "revision id, timestamp, editor, edit summary, and byte-size "
+            "delta vs the previous revision. Each revision links to its "
+            "diff (Special:Diff/<revid>) so you can inspect exactly what "
+            "changed. Useful for tracking how an article evolves, auditing "
+            "edits on a topic, or spotting edit activity around current "
+            "events. Complements `pageviews` (popularity) with provenance "
+            "(who changed what, when)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max revisions to return (default 10, max 50)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "pageviews",
         "description": (
             "Get daily view counts for a Wikipedia article over a date range "
@@ -1673,6 +1778,8 @@ def _call_tool(name: str, args: dict) -> str:
         return backlinks(**args)
     if name == "translations":
         return translations(**args)
+    if name == "revisions":
+        return revisions(**args)
     if name == "pageviews":
         return pageviews(**args)
     if name == "news":
