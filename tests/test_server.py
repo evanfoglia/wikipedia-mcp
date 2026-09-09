@@ -214,6 +214,45 @@ def main() -> int:
     check("de returns events", out.startswith("**On this day"), out[:300])
     check("de wikipedia.org link", "de.wikipedia.org/wiki/" in out, out[:500])
 
+    section("deaths_on_this_day")
+    out = server.deaths_on_this_day()
+    check("returns header", out.startswith("**Deaths on this day"), out[:200])
+    check("contains at least one death", "- **" in out, out[:300])
+    check("contains Wikipedia link", "wikipedia.org/wiki/" in out, out[:500])
+
+    section("deaths_on_this_day — count clamping")
+    out = server.deaths_on_this_day(count=3)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=3 returns ≤3 deaths", bullet_count <= 3, f"got {bullet_count}")
+    out = server.deaths_on_this_day(count=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=999 clamps to ≤10", bullet_count <= 10, f"got {bullet_count}")
+    out = server.deaths_on_this_day(count=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- **"))
+    check("count=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+
+    section("deaths_on_this_day — non-int count falls back gracefully")
+    out = server.deaths_on_this_day(count="abc")
+    check(
+        "non-int count returns deaths (no crash)",
+        out.startswith("**Deaths on this day"),
+        out[:300],
+    )
+
+    section("deaths_on_this_day — multi-language")
+    out = server.deaths_on_this_day(lang="de")
+    check("de returns deaths", out.startswith("**Deaths on this day"), out[:300])
+    check("de wikipedia.org link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("deaths_on_this_day — dispatcher routing")
+    out = server._call_tool("deaths_on_this_day", {})
+    check("dispatcher routes to deaths_on_this_day", "Unknown tool" not in out, out[:200])
+    check(
+        "dispatcher returned real content",
+        out.startswith("**Deaths on this day"),
+        out[:200],
+    )
+
     section("categories")
     out = server.categories("Tyrannosaurus")
     check("returns header", out.startswith("**Categories for"), out[:200])
@@ -278,63 +317,47 @@ def main() -> int:
     check("dispatcher routes to links", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
-    section("translations")
-    out = server.translations("Tyrannosaurus")
-    check("returns header", out.startswith("**Translations of"), out[:200])
-    # Each row is "- `xx`: [Title](url)" — count rows that match that shape.
-    bullet_count = sum(
-        1 for line in out.splitlines()
-        if line.startswith("- `") and "](" in line and "wikipedia.org/wiki/" in line
-    )
-    check("contains at least 5 language entries", bullet_count >= 5, f"got {bullet_count}")
+    section("backlinks")
+    out = server.backlinks("Tyrannosaurus")
+    check("returns header", out.startswith("**Backlinks to"), out[:200])
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("contains a bullet list", bullet_count >= 5, f"got {bullet_count} bullets")
     check("article link present", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
-    # Tyrannosaurus reliably has German and French editions
+    # Velociraptor is widely referenced — at least one referrer should surface
     check(
-        "includes an expected language entry",
-        any(lang in out for lang in ("`de`", "`fr`", "`es`", "`ja`", "`zh`", "`pt`", "`it`", "`ru`", "`nl`")),
+        "includes an expected referrer article",
+        any(name in out for name in ("Albertosaurus", "Allosaurus", "Cretaceous", "theropod", "Dinosaur", "Carnosauria", "Tyrannosauridae")),
         out[:2000],
     )
 
-    section("translations — limit clamping + type safety")
-    out = server.translations("Tyrannosaurus", limit=999)
-    bullet_count = sum(
-        1 for line in out.splitlines()
-        if line.startswith("- `") and "](" in line and "wikipedia.org/wiki/" in line
-    )
-    check("limit=999 clamps to ≤100", bullet_count <= 100, f"got {bullet_count}")
-    out = server.translations("Tyrannosaurus", limit=-5)
-    bullet_count = sum(
-        1 for line in out.splitlines()
-        if line.startswith("- `") and "](" in line and "wikipedia.org/wiki/" in line
-    )
+    section("backlinks — limit clamping + type safety")
+    out = server.backlinks("Tyrannosaurus", limit=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=999 clamps to ≤50", bullet_count <= 50, f"got {bullet_count}")
+    out = server.backlinks("Tyrannosaurus", limit=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
     check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
-    out = server.translations("Tyrannosaurus", limit="abc")
-    check(
-        "non-int limit returns translations (no crash)",
-        out.startswith("**Translations of"),
-        out[:300],
-    )
+    out = server.backlinks("Tyrannosaurus", limit="abc")
+    check("non-int limit returns backlinks (no crash)", out.startswith("**Backlinks to"), out[:300])
 
-    section("translations — missing article")
-    out = server.translations("ThisArticleDoesNotExist12345")
+    section("backlinks — missing article")
+    out = server.backlinks("ThisArticleDoesNotExist12345")
     check("missing article returns clear message", "not found" in out, out[:300])
 
-    section("translations — multi-language")
-    # Query from German Wikipedia — should return the non-German editions
-    # of the German 'Berlin' article (so 'en' must be in the list).
-    out = server.translations("Berlin", limit=5, lang="de")
-    check("de returns translations", out.startswith("**Translations of"), out[:300])
-    check("de source article link", "de.wikipedia.org/wiki/Berlin" in out, out[:500])
+    section("backlinks — multi-language")
+    out = server.backlinks("Berlin", limit=5, lang="de")
+    check("de returns backlinks", out.startswith("**Backlinks to"), out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
 
-    section("translations — dispatcher routing")
-    out = server._call_tool("translations", {"title": "Velociraptor"})
-    check("dispatcher routes to translations", "Unknown tool" not in out, out[:200])
-    check("dispatcher returned real content", out.startswith("**Translations of"), out[:200])
+    section("backlinks — dispatcher routing")
+    out = server._call_tool("backlinks", {"title": "Velociraptor"})
+    check("dispatcher routes to backlinks", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("**Backlinks to"), out[:200])
 
     section("tool registry")
-    check("all 18 tools listed", len(server.TOOLS) == 18)
+    check("all 19 tools listed", len(server.TOOLS) == 19)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "categories", "links", "translations", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -721,11 +744,13 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "on_this_day":
             out = server._call_tool(name, {})
+        elif name == "deaths_on_this_day":
+            out = server._call_tool(name, {})
         elif name == "categories":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "links":
             out = server._call_tool(name, {"title": "Velociraptor"})
-        elif name == "translations":
+        elif name == "backlinks":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "pageviews":
             out = server._call_tool(name, {"title": "Velociraptor"})
