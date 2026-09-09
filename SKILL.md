@@ -23,6 +23,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `on_this_day` | Historical events that happened on today's date |
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
+| `translations` | All language versions of an article (langlinks) — discover what languages it exists in |
 | `pageviews` | Daily view counts for an article (popularity research, trending topics) |
 | `news` | Current events from Wikipedia's Main Page "In the news" section |
 | `top_reads` | Most-read articles on Wikipedia for a given date (trending discovery) |
@@ -90,6 +91,8 @@ mcporter call wikipedia categories --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus", "limit": 10}'
 mcporter call wikipedia links --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia links --args '{"title": "Tyrannosaurus", "limit": 30}'
+mcporter call wikipedia translations --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia translations --args '{"title": "Tyrannosaurus", "limit": 10}'
 mcporter call wikipedia pageviews --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia pageviews --args '{"title": "Python_(programming_language)", "start": "20250101", "end": "20250107"}'
 mcporter call wikipedia news
@@ -121,6 +124,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `on_this_day` returns historical events for today's UTC date from Wikipedia's "On This Day" feed — pairs with featured_article for daily "today in history" content hooks
 - `categories` returns Wikipedia categories for an article (hidden/maintenance categories filtered) — useful for taxonomy-based discovery beyond text search
 - `links` returns the article's outgoing Wikipedia links (main namespace only) — graph-style discovery showing which genera, people, and concepts an article references
+- `translations` returns all language editions of an article (langlinks) — the other-language titles that Wikipedia knows about. Complements the one-way `lang` parameter used by other tools: every tool can query a single language, but only `translations` reveals the article's full language coverage so callers can pick a target language to fetch next. Useful for translation research (full coverage vs. stub languages), cross-language content sourcing, and language-coverage analysis.
 - `pageviews` returns daily view counts for an article over a date range (default last 7 days) — popularity research, trending topics, historical interest spikes. Uses Wikimedia's pageviews REST API.
 - `news` returns today's editorially-curated current events from Wikipedia's Main Page "In the news" block — pairs with featured_article (today's long-form) and on_this_day (historical) for a full "today in Wikipedia" content hook
 - `top_reads` returns the most-viewed articles on Wikipedia for a given date (default yesterday UTC) — answers "what is everyone reading right now" while `pageviews` answers "how is this specific article trending". Filters out Main_Page, Special:Search, Portal:Current_events, etc. so the result is real articles only.

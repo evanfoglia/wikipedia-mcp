@@ -278,10 +278,63 @@ def main() -> int:
     check("dispatcher routes to links", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Links from"), out[:200])
 
+    section("translations")
+    out = server.translations("Tyrannosaurus")
+    check("returns header", out.startswith("**Translations of"), out[:200])
+    # Each row is "- `xx`: [Title](url)" — count rows that match that shape.
+    bullet_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- `") and "](" in line and "wikipedia.org/wiki/" in line
+    )
+    check("contains at least 5 language entries", bullet_count >= 5, f"got {bullet_count}")
+    check("article link present", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+    # Tyrannosaurus reliably has German and French editions
+    check(
+        "includes an expected language entry",
+        any(lang in out for lang in ("`de`", "`fr`", "`es`", "`ja`", "`zh`", "`pt`", "`it`", "`ru`", "`nl`")),
+        out[:2000],
+    )
+
+    section("translations — limit clamping + type safety")
+    out = server.translations("Tyrannosaurus", limit=999)
+    bullet_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- `") and "](" in line and "wikipedia.org/wiki/" in line
+    )
+    check("limit=999 clamps to ≤100", bullet_count <= 100, f"got {bullet_count}")
+    out = server.translations("Tyrannosaurus", limit=-5)
+    bullet_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- `") and "](" in line and "wikipedia.org/wiki/" in line
+    )
+    check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+    out = server.translations("Tyrannosaurus", limit="abc")
+    check(
+        "non-int limit returns translations (no crash)",
+        out.startswith("**Translations of"),
+        out[:300],
+    )
+
+    section("translations — missing article")
+    out = server.translations("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:300])
+
+    section("translations — multi-language")
+    # Query from German Wikipedia — should return the non-German editions
+    # of the German 'Berlin' article (so 'en' must be in the list).
+    out = server.translations("Berlin", limit=5, lang="de")
+    check("de returns translations", out.startswith("**Translations of"), out[:300])
+    check("de source article link", "de.wikipedia.org/wiki/Berlin" in out, out[:500])
+
+    section("translations — dispatcher routing")
+    out = server._call_tool("translations", {"title": "Velociraptor"})
+    check("dispatcher routes to translations", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("**Translations of"), out[:200])
+
     section("tool registry")
-    check("all 17 tools listed", len(server.TOOLS) == 17)
+    check("all 18 tools listed", len(server.TOOLS) == 18)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "categories", "links", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "categories", "links", "translations", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -671,6 +724,8 @@ def main() -> int:
         elif name == "categories":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "links":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "translations":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "pageviews":
             out = server._call_tool(name, {"title": "Velociraptor"})
