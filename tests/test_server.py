@@ -354,6 +354,47 @@ def main() -> int:
     check("dispatcher routes to backlinks", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Backlinks to"), out[:200])
 
+    section("nearby")
+    out = server.nearby("Eiffel Tower", limit=10)
+    check("returns header", out.startswith("**Articles near"), out[:200])
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("contains a bullet list", bullet_count >= 3, f"got {bullet_count} bullets")
+    check("distances shown", " m" in out or " km" in out, out[:500])
+    check("article link present", "en.wikipedia.org/wiki/Eiffel_Tower" in out, out[:500])
+
+    section("nearby — coordinates anchor")
+    out = server.nearby(lat=40.7484, lon=-73.9857, limit=5)
+    check("returns header", out.startswith("**Articles near"), out[:200])
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("contains a bullet list", bullet_count >= 3, f"got {bullet_count} bullets")
+
+    section("nearby — radius clamping + limit clamping + type safety")
+    out = server.nearby("Eiffel Tower", limit=999)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=999 clamps to ≤50", bullet_count <= 50, f"got {bullet_count}")
+    out = server.nearby("Eiffel Tower", limit=-5)
+    bullet_count = sum(1 for line in out.splitlines() if line.startswith("- "))
+    check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+    out = server.nearby("Eiffel Tower", radius=999999, limit=3)
+    check("radius clamps without crash", out.startswith("**Articles near"), out[:200])
+    out = server.nearby("Eiffel Tower", limit="abc")
+    check("non-int limit returns nearby (no crash)", out.startswith("**Articles near"), out[:300])
+
+    section("nearby — missing/invalid input")
+    out = server.nearby("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out or "No nearby" in out, out[:300])
+    out = server.nearby()
+    check("no anchor returns usage message", "title" in out and "lat" in out, out[:300])
+    out = server.nearby(lat=200, lon=0)
+    check("out-of-range lat rejected", "Invalid coordinates" in out, out[:300])
+    out = server.nearby(lat="abc", lon=0)
+    check("non-numeric lat rejected", "Invalid coordinates" in out, out[:300])
+
+    section("nearby — dispatcher routing")
+    out = server._call_tool("nearby", {"title": "Eiffel Tower", "limit": 3})
+    check("dispatcher routes to nearby", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("**Articles near"), out[:200])
+
     section("translations")
     out = server.translations("Tyrannosaurus")
     check("returns header", out.startswith("**Translations of"), out[:200])
@@ -438,9 +479,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 21 tools listed", len(server.TOOLS) == 21)
+    check("all 22 tools listed", len(server.TOOLS) == 22)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
