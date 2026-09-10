@@ -354,6 +354,78 @@ def main() -> int:
     check("dispatcher routes to backlinks", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Backlinks to"), out[:200])
 
+    section("external_links")
+    out = server.external_links("Tyrannosaurus")
+    check("returns header", out.startswith("**External links from"), out[:200])
+    check("contains the article title", "Tyrannosaurus" in out, out[:300])
+    # Bulleted list of URL lines — every line starts with "- http" or "- https"
+    bullet_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- http://") or line.startswith("- https://")
+    )
+    check("contains at least 5 external URLs", bullet_count >= 5, f"got {bullet_count}")
+    check("article link present", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
+
+    section("external_links — URLs are off-wiki")
+    # External links by definition point OFF Wikipedia. None of the URLs
+    # should be on a wikipedia.org host (those would be `links`, not
+    # `external_links`). The article link at the bottom is the only
+    # wikipedia.org URL allowed.
+    out = server.external_links("Tyrannosaurus", limit=30)
+    url_lines = [
+        line[len("- "):].strip()
+        for line in out.splitlines()
+        if line.startswith("- http://") or line.startswith("- https://")
+    ]
+    check("at least one URL rendered", len(url_lines) >= 1, out[:1000])
+    off_wiki = [
+        url for url in url_lines
+        if "wikipedia.org" not in url and "wikimedia.org" not in url
+    ]
+    check(
+        "all bullet URLs are off-wiki",
+        len(off_wiki) == len(url_lines),
+        f"off_wiki={len(off_wiki)} total={len(url_lines)}",
+    )
+
+    section("external_links — limit clamping + type safety")
+    out = server.external_links("Tyrannosaurus", limit=999)
+    bullet_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- http://") or line.startswith("- https://")
+    )
+    check("limit=999 clamps to ≤50", bullet_count <= 50, f"got {bullet_count}")
+    out = server.external_links("Tyrannosaurus", limit=-5)
+    bullet_count = sum(
+        1 for line in out.splitlines()
+        if line.startswith("- http://") or line.startswith("- https://")
+    )
+    check("limit=-5 clamps to ≥1", bullet_count >= 1, f"got {bullet_count}")
+    out = server.external_links("Tyrannosaurus", limit="abc")
+    check(
+        "non-int limit returns external links (no crash)",
+        out.startswith("**External links from"),
+        out[:300],
+    )
+
+    section("external_links — missing article")
+    out = server.external_links("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:300])
+
+    section("external_links — multi-language")
+    out = server.external_links("Berlin", limit=5, lang="de")
+    check("de returns external links", out.startswith("**External links from"), out[:300])
+    check("de wikipedia link", "de.wikipedia.org/wiki/" in out, out[:500])
+
+    section("external_links — dispatcher routing")
+    out = server._call_tool("external_links", {"title": "Velociraptor"})
+    check("dispatcher routes to external_links", "Unknown tool" not in out, out[:200])
+    check(
+        "dispatcher returned real content",
+        out.startswith("**External links from"),
+        out[:200],
+    )
+
     section("translations")
     out = server.translations("Tyrannosaurus")
     check("returns header", out.startswith("**Translations of"), out[:200])
@@ -438,9 +510,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 21 tools listed", len(server.TOOLS) == 21)
+    check("all 22 tools listed", len(server.TOOLS) == 22)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -834,6 +906,8 @@ def main() -> int:
         elif name == "links":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "backlinks":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "external_links":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "translations":
             out = server._call_tool(name, {"title": "Velociraptor"})

@@ -121,6 +121,7 @@ Uses Wikipedia's free public REST API — no API key required.
 
 - Search: MediaWiki Action API
 - Summary / Random / Featured: REST API v1 (`/api/rest_v1/...`)
+- External links: MediaWiki Action API (`prop=extlinks`)
 
 ## Notes
 

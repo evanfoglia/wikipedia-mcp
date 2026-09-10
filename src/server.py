@@ -624,6 +624,71 @@ def backlinks(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def external_links(title: str, limit: int = 20, lang: str = "en") -> str:
+    """List external (off-wiki) links from a Wikipedia article.
+
+    Returns the first N external URLs the article links to — citations,
+    references, primary sources, archives, and other off-wiki resources
+    that the article uses to back up its claims. This is the outbound
+    complement to `links` (internal outgoing) and `backlinks` (internal
+    incoming): `external_links` shows what the article points to
+    OUTSIDE Wikipedia. The trio (`links` + `backlinks` + `external_links`)
+    maps the full network around an article.
+
+    Wikipedia exposes external links via the MediaWiki Action API's
+    `prop=extlinks` parameter — each entry is the raw URL (the `*` field
+    in the JSON response). Useful for source verification (does the
+    article actually cite the claim?), citation audits, building a
+    bibliography, primary-source discovery, and fact-checking research.
+    Pairs naturally with `links` (in-article reference network) and
+    `categories` (taxonomy) for full article-network analysis.
+
+    `limit` clamps the number of URLs returned (default 20, max 50).
+    Articles with dense citation footers can easily have hundreds of
+    external links — raise the limit if you need a full bibliography
+    audit, or keep the default for a quick "what does this cite?" scan.
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    params = {
+        "action": "query",
+        "prop": "extlinks",
+        "titles": title,
+        "ellimit": limit,
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No external links found for '{title}'."
+
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    ext = page.get("extlinks", [])
+    if not ext:
+        return f"No external links found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    out = f'**External links from "{page_title}":**\n\n'
+    for entry in ext:
+        url = (entry.get("*") or "").strip()
+        if url:
+            out += f"- {url}\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+    )
+    return out
+
+
 def categories(title: str, limit: int = 20, lang: str = "en") -> str:
     """List Wikipedia categories for an article.
 
@@ -1487,6 +1552,40 @@ TOOLS = [
         },
     },
     {
+        "name": "external_links",
+        "description": (
+            "List external (off-wiki) links from a Wikipedia article — "
+            "citations, references, primary sources, and other off-wiki "
+            "resources the article points to. Outbound complement to "
+            "`links` (internal outgoing) and `backlinks` (internal "
+            "incoming): the trio (`links` + `backlinks` + `external_links`) "
+            "maps the full reference network around an article. Useful "
+            "for source verification, citation audits, primary-source "
+            "discovery, and fact-checking research."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max external links to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "translations",
         "description": (
             "List all language versions of a Wikipedia article (langlinks). "
@@ -1776,6 +1875,8 @@ def _call_tool(name: str, args: dict) -> str:
         return links(**args)
     if name == "backlinks":
         return backlinks(**args)
+    if name == "external_links":
+        return external_links(**args)
     if name == "translations":
         return translations(**args)
     if name == "revisions":
