@@ -25,6 +25,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
 | `backlinks` | List incoming Wikipedia links to an article — what links here (inverse of `links`) |
+| `external_links` | List external (off-wiki) links from an article — citations, references, primary sources |
 | `nearby` | Articles geographically near a location — anchor by article title or lat/lon, distances included |
 | `translations` | All language versions of an article (langlinks) — discover what languages it exists in |
 | `revisions` | Recent edit history of an article — who edited it, when, edit summaries, byte-size deltas, diff links |
@@ -123,6 +124,7 @@ mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 Uses Wikipedia's free public REST API — no API key required.
 
 - Search: MediaWiki Action API
+- External links: MediaWiki Action API (`prop=extlinks`)
 - Summary / Random / Featured: REST API v1 (`/api/rest_v1/...`)
 
 ## Notes
