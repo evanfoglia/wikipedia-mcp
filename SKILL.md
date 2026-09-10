@@ -25,6 +25,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
 | `backlinks` | List incoming Wikipedia links to an article — what links here (inverse of `links`) |
+| `nearby` | Articles geographically near a location — anchor by article title or lat/lon, distances included |
 | `translations` | All language versions of an article (langlinks) — discover what languages it exists in |
 | `revisions` | Recent edit history of an article — who edited it, when, edit summaries, byte-size deltas, diff links |
 | `pageviews` | Daily view counts for an article (popularity research, trending topics) |
@@ -98,6 +99,8 @@ mcporter call wikipedia links --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia links --args '{"title": "Tyrannosaurus", "limit": 30}'
 mcporter call wikipedia backlinks --args '{"title": "Velociraptor"}'
 mcporter call wikipedia backlinks --args '{"title": "Velociraptor", "limit": 30}'
+mcporter call wikipedia nearby --args '{"title": "Eiffel Tower"}'
+mcporter call wikipedia nearby --args '{"lat": 40.7484, "lon": -73.9857, "radius": 2000}'
 mcporter call wikipedia translations --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia translations --args '{"title": "Tyrannosaurus", "limit": 10}'
 mcporter call wikipedia revisions --args '{"title": "Tyrannosaurus"}'
@@ -135,6 +138,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `categories` returns Wikipedia categories for an article (hidden/maintenance categories filtered) — useful for taxonomy-based discovery beyond text search
 - `links` returns the article's outgoing Wikipedia links (main namespace only) — graph-style discovery showing which genera, people, and concepts an article references
 - `backlinks` returns the article's incoming Wikipedia links (what links here) — the inverse of `links`. Shows which other articles reference this one (cultural mentions, scientific citations, comparative anatomy pages, etc.). Same main-namespace filtering.
+- `nearby` returns Wikipedia articles geographically near a location, with distances — location-based discovery. Anchor by article title (e.g. 'Eiffel Tower', uses that article's coordinates so no geocoding service is needed) or by explicit lat/lon. Radius in meters (default 1000, max 10000), main-namespace only. Useful for travel research and "what's notable around here" questions.
 - `translations` returns all language editions of an article (langlinks) — the other-language titles that Wikipedia knows about. Complements the one-way `lang` parameter used by other tools: every tool can query a single language, but only `translations` reveals the article's full language coverage so callers can pick a target language to fetch next. Useful for translation research (full coverage vs. stub languages), cross-language content sourcing, and language-coverage analysis.
 - `pageviews` returns daily view counts for an article over a date range (default last 7 days) — popularity research, trending topics, historical interest spikes. Uses Wikimedia's pageviews REST API.
 - `news` returns today's editorially-curated current events from Wikipedia's Main Page "In the news" block — pairs with featured_article (today's long-form) and on_this_day (historical) for a full "today in Wikipedia" content hook
