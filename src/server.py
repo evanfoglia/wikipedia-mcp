@@ -689,6 +689,104 @@ def external_links(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def nearby(title: str = "", lat=None, lon=None, radius: int = 1000,
+           limit: int = 20, lang: str = "en") -> str:
+    """List Wikipedia articles geographically near a location.
+
+    Two ways to anchor the search (provide one):
+    - title: an article title, e.g. 'Eiffel Tower' — finds articles near
+      that article's recorded coordinates (no external geocoding needed).
+    - lat + lon: explicit decimal coordinates, e.g. lat=48.8584, lon=2.2945.
+      If both title and coordinates are given, the coordinates win.
+
+    Returns nearby articles with their distance from the anchor, plus a
+    link to the anchor article. Useful for location-based discovery —
+    "what's notable around here", travel research, mapping notable places
+    around a landmark. Filters to main namespace (ns=0).
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        radius = max(10, min(int(radius), 10000))
+    except (TypeError, ValueError):
+        radius = 1000
+
+    params = {
+        "action": "query",
+        "list": "geosearch",
+        "gsradius": radius,
+        "gslimit": limit,
+        "gsnamespace": 0,
+        "format": "json",
+        "formatversion": 2,
+        "origin": "*",
+    }
+
+    title = (title or "").strip()
+    anchor_label = ""
+    anchor_link = ""
+    used_coords = False
+    if lat is not None and lon is not None and str(lat) != "" and str(lon) != "":
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except (TypeError, ValueError):
+            return (
+                "Invalid coordinates: lat and lon must be numbers "
+                f"(got lat={lat!r}, lon={lon!r})."
+            )
+        if not (-90 <= lat_f <= 90) or not (-180 <= lon_f <= 180):
+            return (
+                "Invalid coordinates: lat must be between -90 and 90, "
+                f"lon between -180 and 180 (got lat={lat_f}, lon={lon_f})."
+            )
+        params["gscoord"] = f"{lat_f}|{lon_f}"
+        anchor_label = f"{lat_f}, {lon_f}"
+        used_coords = True
+    elif title:
+        params["gspage"] = title
+        anchor_label = f'"{title}"'
+        anchor_link = (
+            f"\n[View {title}]"
+            f"(https://{lang}.wikipedia.org/wiki/{_slug(title)})"
+        )
+    else:
+        return (
+            "Provide a location: either `title` (an article title, e.g. "
+            "'Eiffel Tower') or both `lat` and `lon` (decimal coordinates, "
+            "e.g. lat=48.8584, lon=2.2945)."
+        )
+
+    resp = _get(_wiki(lang), params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    results = data.get("query", {}).get("geosearch", [])
+    if not results:
+        hint = (
+            " — the article may not exist or has no coordinates recorded"
+            if title and not used_coords
+            else ""
+        )
+        return f"No nearby articles found for {anchor_label}{hint}."
+
+    def _fmt_dist(m):
+        m = float(m)
+        return f"{m:,.0f} m" if m < 1000 else f"{m / 1000:,.1f} km"
+
+    out = (
+        f"**Articles near {anchor_label} "
+        f"(within {_fmt_dist(radius)}):**\n\n"
+    )
+    for r in results:
+        name = r.get("title", "").strip()
+        if name:
+            out += f"- {name} — {_fmt_dist(r.get('dist', 0))}\n"
+    out += anchor_link
+    return out
+
+
 def categories(title: str, limit: int = 20, lang: str = "en") -> str:
     """List Wikipedia categories for an article.
 
@@ -1586,6 +1684,50 @@ TOOLS = [
         },
     },
     {
+        "name": "nearby",
+        "description": (
+            "List Wikipedia articles geographically near a location — "
+            "location-based discovery. Anchor by article title (e.g. "
+            "'Eiffel Tower' — uses that article's coordinates, no "
+            "geocoding service needed) or by explicit lat/lon. Returns "
+            "nearby articles with distances in meters/km. Useful for "
+            "travel research and 'what's notable around here' questions."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Anchor article title (e.g. 'Eiffel Tower'). Use instead of lat/lon.",
+                },
+                "lat": {
+                    "type": "number",
+                    "description": "Latitude in decimal degrees (-90 to 90). Requires lon.",
+                },
+                "lon": {
+                    "type": "number",
+                    "description": "Longitude in decimal degrees (-180 to 180). Requires lat.",
+                },
+                "radius": {
+                    "type": "integer",
+                    "description": "Search radius in meters (default 1000, max 10000)",
+                    "default": 1000,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max articles to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+        },
+    },
+    {
         "name": "translations",
         "description": (
             "List all language versions of a Wikipedia article (langlinks). "
@@ -1877,6 +2019,8 @@ def _call_tool(name: str, args: dict) -> str:
         return backlinks(**args)
     if name == "external_links":
         return external_links(**args)
+    if name == "nearby":
+        return nearby(**args)
     if name == "translations":
         return translations(**args)
     if name == "revisions":
