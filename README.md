@@ -19,6 +19,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
 | `backlinks` | List incoming Wikipedia links to an article (what links here / referrer pages — inverse of `links`) |
+| `external_links` | List external (off-wiki) links from an article — citations, references, and primary sources the article points to (outbound complement to `links` + `backlinks`) |
 | `nearby` | List Wikipedia articles geographically near a location — anchor by article title (e.g. 'Eiffel Tower') or lat/lon, with distances |
 | `translations` | List all language versions of an article (langlinks) — discover what languages it exists in |
 | `revisions` | Show an article's recent edit history (who edited it, when, edit summaries, size deltas) with diff links |
