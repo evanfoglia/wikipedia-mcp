@@ -188,6 +188,21 @@ def main() -> int:
     out = server.featured_article()
     check("returns markdown", out.startswith("## "), out[:200])
 
+    section("picture_of_the_day")
+    out = server.picture_of_the_day()
+    check("returns header", out.startswith("🖼️ **Picture of the Day"), out[:200])
+    check("includes image URL", "wikimedia.org" in out, out[:500])
+    check("includes file page link", "commons.wikimedia.org" in out, out[-300:])
+
+    section("picture_of_the_day — explicit date")
+    out = server.picture_of_the_day(date="20260904")
+    check("historical date returns header", out.startswith("🖼️ **Picture of the Day"), out[:200])
+    check("header shows the requested date", "September 04, 2026" in out, out[:200])
+
+    section("picture_of_the_day — bad date")
+    out = server.picture_of_the_day(date="notadate")
+    check("rejects bad date with format hint", "YYYYMMDD" in out, out[:200])
+
     section("on_this_day")
     out = server.on_this_day()
     check("returns header", out.startswith("**On this day"), out[:200])
@@ -551,9 +566,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 23 tools listed", len(server.TOOLS) == 23)
+    check("all 24 tools listed", len(server.TOOLS) == 24)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
