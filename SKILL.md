@@ -18,6 +18,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `did_you_know` | Random "Did You Know" fact |
 | `dino_fact` | Dinosaur/prehistory fact (specific species or random) |
 | `featured_article` | Today's Wikipedia Featured Article |
+| `picture_of_the_day` | Wikimedia Commons' Picture of the Day — curated daily image (default today UTC, optional YYYYMMDD date) |
 | `article_extract` | Full plain-text article extract by title (longer than `summary`) |
 | `article_sections` | Table of contents (section headings) for an article — navigate before reading the full body |
 | `on_this_day` | Historical events that happened on today's date |
@@ -88,6 +89,8 @@ mcporter call wikipedia dino_fact --args '{"species": "Spinosaurus"}'
 mcporter call wikipedia dino_fact
 mcporter call wikipedia did_you_know
 mcporter call wikipedia featured_article
+mcporter call wikipedia picture_of_the_day
+mcporter call wikipedia picture_of_the_day --args '{"date": "20260901"}'
 mcporter call wikipedia article_extract --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia article_sections --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia on_this_day
@@ -125,14 +128,15 @@ Uses Wikipedia's free public REST API — no API key required.
 
 - Search: MediaWiki Action API
 - External links: MediaWiki Action API (`prop=extlinks`)
-- Summary / Random / Featured: REST API v1 (`/api/rest_v1/...`)
+- Summary / Random / Featured / Picture of the Day: REST API v1 (`/api/rest_v1/...`)
 
 ## Notes
 
-- User-Agent is `wikipedia-mcp/1.1.9` per Wikipedia API etiquette
+- User-Agent is `wikipedia-mcp/1.1.13` per Wikipedia API etiquette
 - All responses include links back to the source article
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
+- `picture_of_the_day` returns Wikimedia Commons' Picture of the Day from Wikipedia's featured feed — the visual counterpart to `featured_article`. Accepts an optional `date` (YYYYMMDD, default today UTC) to browse past pictures. Returns the embedded thumbnail preview, file name, photographer/artist, license, description, and links to the full-size image + Commons file page. `image`/`media_list` cover article-specific media; this covers the editorially curated daily pick.
 - `article_extract` returns the full plain-text article (vs `summary`'s short extract + thumbnail) — use when you need more than a summary
 - `article_sections` returns the article's table of contents — section number, heading text, and nesting level — so callers can navigate long articles (50KB+ body) by picking the section they want before committing to `article_extract`. Pairs with `summary` (lead), `article_sections` (structure), `article_extract` (full body).
 - `on_this_day` returns historical events for today's UTC date from Wikipedia's "On This Day" feed — pairs with featured_article for daily "today in history" content hooks

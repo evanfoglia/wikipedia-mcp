@@ -12,6 +12,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `did_you_know` | Get a random "Did You Know" style fact |
 | `dino_fact` | Get a dino/prehistory-specific fact (specific species or random) |
 | `featured_article` | Get today's Wikipedia Featured Article |
+| `picture_of_the_day` | Get Wikimedia Commons' Picture of the Day (today, or a YYYYMMDD date) |
 | `article_extract` | Get a full plain-text extract of an article (longer than `summary`) |
 | `article_sections` | Get the table of contents (section headings) for an article — useful for navigating long articles before reading the full body |
 | `on_this_day` | Get historical events that happened on today's date |
@@ -75,6 +76,10 @@ mcporter call wikipedia dino_fact --args '{"species": "Spinosaurus"}'
 
 # Today's featured article
 mcporter call wikipedia featured_article
+
+# Picture of the Day (curated daily image from Wikimedia Commons)
+mcporter call wikipedia picture_of_the_day
+mcporter call wikipedia picture_of_the_day --args '{"date": "20260901"}'
 
 # Full plain-text article extract (vs summary)
 mcporter call wikipedia article_extract --args '{"title": "Tyrannosaurus"}'
