@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.12"
+SERVER_VERSION = "1.1.13"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -377,6 +377,75 @@ def featured_article(lang: str = "en") -> str:
     # Feed wraps the article under "tfa" (today's featured article)
     data = payload.get("tfa") or payload
     return _summary_block(data, fallback_title=data.get("title", "Featured Article"))
+
+
+def picture_of_the_day(date: str = "", lang: str = "en") -> str:
+    """Get Wikimedia Commons' Picture of the Day.
+
+    The Wikimedia REST "featured" feed publishes one curated image per day
+    from the Commons Picture of the Day selection — the same image shown
+    on the Wikipedia Main Page. Each entry carries the file title, a
+    thumbnail URL, the full-size image URL, the photographer/artist, the
+    license, and a short description of what the image shows.
+
+    `date` is an optional YYYYMMDD string (default: today UTC) so past
+    pictures can be browsed — e.g. picture_of_the_day(date="20260901").
+    This is the visual counterpart to the other daily content hooks:
+    `featured_article` (long-form), `on_this_day` (history), `news`
+    (current events), `did_you_know` (facts) — together they form a
+    complete "today in Wikipedia" daily digest. The `image`/`media_list`
+    tools cover article-specific media; this tool covers the editorially
+    curated daily pick.
+
+    Returns markdown: image preview (embedded thumbnail), file name,
+    photographer, license, description, plus links to the full-size
+    image and the Commons file page.
+    """
+    lang = lang if lang in SUPPORTED_LANGS else "en"
+
+    if date == "":
+        dt = datetime.now(timezone.utc)
+    else:
+        try:
+            dt = datetime.strptime(date, "%Y%m%d")
+        except ValueError:
+            return f"Error: date must be in YYYYMMDD format (got '{date}')"
+
+    resp = _get(f"{_base(lang)}/feed/featured/{dt.strftime('%Y/%m/%d')}")
+    if resp.status_code == 404:
+        return f"No picture of the day found for {dt.strftime('%Y-%m-%d')}."
+    resp.raise_for_status()
+    img = resp.json().get("image")
+    if not img:
+        return f"No picture of the day found for {dt.strftime('%Y-%m-%d')}."
+
+    title = img.get("title", "Picture of the Day")
+    desc = _strip_html((img.get("description") or {}).get("text", "") or "").strip()
+    artist = _strip_html((img.get("artist") or {}).get("text", "") or "").strip()
+    license_info = img.get("license") or {}
+    license_label = (license_info.get("type") or license_info.get("code") or "").strip()
+    thumb = ((img.get("thumbnail") or {}).get("source", "") or "").split("?")[0]
+    full = ((img.get("image") or {}).get("source", "") or "").split("?")[0]
+    file_page = img.get("file_page", "")
+
+    out = f"🖼️ **Picture of the Day — {dt.strftime('%B %d, %Y')}**\n\n"
+    if thumb:
+        out += f"![{desc[:80] if desc else title}]({thumb})\n\n"
+    out += f"**File:** {title}\n"
+    if artist:
+        out += f"**Photographer:** {artist}\n"
+    if license_label:
+        out += f"**License:** {license_label}\n"
+    if desc:
+        out += f"\n{desc}\n"
+    links = []
+    if full:
+        links.append(f"[Full-size image]({full})")
+    if file_page:
+        links.append(f"[View on Wikimedia Commons]({file_page})")
+    if links:
+        out += "\n" + " · ".join(links)
+    return out
 
 
 def on_this_day(lang: str = "en", count: int = 5) -> str:
@@ -1503,6 +1572,33 @@ TOOLS = [
         },
     },
     {
+        "name": "picture_of_the_day",
+        "description": (
+            "Get Wikimedia Commons' Picture of the Day — the curated daily "
+            "image from Wikipedia's featured feed. Returns preview + "
+            "full-size image URLs, photographer, license, and description. "
+            "Accepts an optional YYYYMMDD date (default today UTC) to "
+            "browse past pictures — the visual counterpart to "
+            "featured_article for daily content hooks."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYYMMDD format (default: today UTC)",
+                    "default": "",
+                },
+            },
+        },
+    },
+    {
         "name": "on_this_day",
         "description": (
             "Get historical events that happened on today's date (UTC) "
@@ -2003,6 +2099,8 @@ def _call_tool(name: str, args: dict) -> str:
         return dino_fact(**args)
     if name == "featured_article":
         return featured_article(**args)
+    if name == "picture_of_the_day":
+        return picture_of_the_day(**args)
     if name == "article_extract":
         return article_extract(**args)
     if name == "article_sections":
