@@ -566,9 +566,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 24 tools listed", len(server.TOOLS) == 24)
+    check("all 25 tools listed", len(server.TOOLS) == 25)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day", "recent_changes"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -797,6 +797,41 @@ def main() -> int:
     out = server._call_tool("image", {"title": "Velociraptor"})
     check("dispatcher routes to image", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Lead Image" in out, out[:200])
+
+    section("recent_changes")
+    out = server.recent_changes(limit=3)
+    check("returns header", "**Recent changes on en.wikipedia.org**" in out, out[:200])
+    check("entries have change-kind labels", any(l in out for l in ("edit", "new article", "categorize", "log")), out[:500])
+    check("entries have article links", "en.wikipedia.org/wiki/" in out, out[:500])
+    check("entries have byte deltas", "bytes" in out, out[:500])
+    check("entries have timestamps", "UTC" in out, out[:500])
+    check("diff links included", "index.php?diff=" in out, out[:500])
+    rows = [l for l in out.splitlines() if l.startswith("- ")]
+    check("respects limit=3", len(rows) <= 3, f"got {len(rows)} rows")
+
+    section("recent_changes — kind='new'")
+    out = server.recent_changes(kind="new", limit=3)
+    check("new-article label present", "new article" in out, out[:500])
+    rows = [l for l in out.splitlines() if l.startswith("- ")]
+    check("all rows are new-article entries", all("new article" in r for r in rows), f"got {len(rows)} rows")
+
+    section("recent_changes — kind validation + limit clamping")
+    out = server.recent_changes(kind="nonsense", limit=2)
+    check("bad kind falls back to all (no crash)", "**Recent changes on" in out, out[:200])
+    out = server.recent_changes(limit=100)
+    rows = [l for l in out.splitlines() if l.startswith("- ")]
+    check("limit=100 clamps to ≤50", len(rows) <= 50, f"got {len(rows)} rows")
+    out = server.recent_changes(limit="abc")
+    check("non-int limit falls back (no crash)", "**Recent changes on" in out, out[:200])
+
+    section("recent_changes — multi-language")
+    out = server.recent_changes(kind="edit", limit=2, lang="de")
+    check("german feed header", "**Recent changes on de.wikipedia.org**" in out, out[:200])
+
+    section("recent_changes — dispatcher routing")
+    out = server._call_tool("recent_changes", {"kind": "edit", "limit": 2})
+    check("dispatcher routes to recent_changes", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "**Recent changes on" in out, out[:200])
 
     section("quote")
     out = server.quote()
