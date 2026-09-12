@@ -1,6 +1,6 @@
 ---
 name: wikipedia
-version: 1.1.10
+version: 1.1.14
 description: Access Wikipedia via MCP — search articles, get summaries, random facts, dinosaur facts, today's featured article, today's historical events, article categories, outgoing links, view counts, current news, and most-read articles. Multi-language support (10 wikis). Great for research, content hooks, and general knowledge lookups.
 ---
 
@@ -36,6 +36,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `image` | Lead image for an article — thumbnail + original URLs, no summary text |
 | `media_list` | All media (images, videos, audio) in an article — full inventory with type, caption, and thumbnail |
 | `quote` | Random notable quote from a curated list of famous authors |
+| `recent_changes` | Most recent changes to Wikipedia articles (live feed) — filter by 'all', 'edit', 'new', 'categorize', or 'log' |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 

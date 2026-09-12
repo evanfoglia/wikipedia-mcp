@@ -30,6 +30,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `image` | Get just the lead image (thumbnail + original URLs) for an article, no summary text |
 | `media_list` | List all media (images, videos, audio) used in an article — full inventory with type, caption, and thumbnail |
 | `quote` | Get a random notable quote from a curated list of famous authors |
+| `recent_changes` | Live window into Wikipedia right now — most recent edits, with kind filter ('all', 'edit', 'new', 'categorize', 'log') for breaking-news edits, newly published articles, and more |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
