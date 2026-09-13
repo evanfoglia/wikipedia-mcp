@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.13"
+SERVER_VERSION = "1.1.14"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -1418,6 +1418,97 @@ def quote(lang: str = "en") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Recent changes — live edit activity on Wikipedia
+# ---------------------------------------------------------------------------
+RECENT_CHANGE_KINDS = ("all", "edit", "new", "categorize", "log")
+
+
+def recent_changes(kind: str = "all", limit: int = 10, lang: str = "en") -> str:
+    """Show the most recent changes to Wikipedia articles.
+
+    Uses the MediaWiki `list=recentchanges` endpoint to stream live edit
+    activity across the article namespace — a window into what's happening
+    on Wikipedia *right now*. Complements `revisions` (history of one
+    article) with the reverse angle: the freshest edits everywhere.
+
+    `kind` filters the stream: "edit" (text changes), "new" (newly
+    published articles — a discovery feed of brand-new pages),
+    "categorize" (category membership changes), "log" (page moves,
+    deletions, protections, etc.). "all" (default) mixes them all.
+
+    Each entry shows the change kind, article link, byte-size delta,
+    editor, timestamp, and edit comment (when present), so callers can
+    spot breaking-news edits, new pages on emerging topics, and
+    bot-maintenance sweeps at a glance. Read-only (HTTPS GET).
+    """
+    kind = str(kind or "all").lower()
+    if kind not in RECENT_CHANGE_KINDS:
+        kind = "all"
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 10
+
+    params = {
+        "action": "query",
+        "list": "recentchanges",
+        "rcnamespace": "0",  # article namespace only
+        "rcprop": "title|ids|sizes|flags|user|comment|timestamp",
+        "rclimit": str(limit),
+        "format": "json",
+    }
+    if kind != "all":
+        params["rctype"] = kind
+
+    try:
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return "Could not fetch recent changes from Wikipedia."
+    if "error" in data:
+        return f"Could not fetch recent changes: {data['error'].get('info', 'API error')}"
+
+    changes = data.get("query", {}).get("recentchanges", [])
+    if not changes:
+        return "No recent changes found on Wikipedia."
+
+    labels = {
+        "edit": "✏️ edit",
+        "new": "🆕 new article",
+        "categorize": "📁 categorize",
+        "log": "📜 log",
+    }
+    base = _wiki(lang).replace("/w/api.php", "")
+    out = f"**Recent changes on {lang}.wikipedia.org**\n\n"
+    for c in changes:
+        ctype = c.get("type", "edit")
+        label = labels.get(ctype, ctype)
+        title = c.get("title", "?")
+        link = f"[{title}]({base}/wiki/{_slug(title)})"
+        delta = c.get("newlen", 0) - c.get("oldlen", 0)
+        size = f"{delta:+d} bytes"
+        user = c.get("user", "?")
+        flags = []
+        if c.get("bot"):
+            flags.append("bot")
+        if c.get("minor"):
+            flags.append("minor")
+        ts = c.get("timestamp", "").replace("T", " ").rstrip("Z") + " UTC"
+        comment = (c.get("comment") or "").strip()
+        flags_txt = f" ({', '.join(flags)})" if flags else ""
+        line = f"- {label} {link} — {size} by **{user}**{flags_txt} — {ts}"
+        if comment:
+            short = comment if len(comment) <= 120 else comment[:117] + "…"
+            line += f'\n  _"{short}"_'
+        revid, old_revid = c.get("revid"), c.get("old_revid")
+        if revid and old_revid:
+            line += f"\n  ([diff]({base}/w/index.php?diff={revid}&oldid={old_revid}))"
+        out += line + "\n"
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -2083,6 +2174,45 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "recent_changes",
+        "description": (
+            "Show the most recent changes to Wikipedia articles — a live "
+            "window into what editors are doing right now. Uses the "
+            "MediaWiki recentchanges feed over the article namespace. "
+            "`kind` filters the stream: 'edit' (text changes), 'new' "
+            "(newly published articles — a discovery feed of brand-new "
+            "pages), 'categorize' (category membership changes), 'log' "
+            "(page moves, deletions, protections). Complements `revisions` "
+            "(history of one article) with the reverse angle: the freshest "
+            "edits everywhere. Each entry shows the change kind, article "
+            "link, byte-size delta, editor, timestamp, edit comment, and a "
+            "diff link — great for spotting breaking-news edits, new pages "
+            "on emerging topics, and bot-maintenance sweeps. Read-only."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "description": "Filter the change stream: 'all' (default), 'edit', 'new', 'categorize', or 'log'",
+                    "default": "all",
+                    "enum": ["all", "edit", "new", "categorize", "log"],
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max changes to return (default 10, max 50)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+        },
+    },
 ]
 
 
@@ -2135,6 +2265,8 @@ def _call_tool(name: str, args: dict) -> str:
         return media_list(**args)
     if name == "quote":
         return quote(**args)
+    if name == "recent_changes":
+        return recent_changes(**args)
     return f"Unknown tool: {name}"
 
 
