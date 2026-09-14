@@ -134,7 +134,12 @@ def _summary_block(data: dict, fallback_title: str) -> str:
 # Tools
 # ---------------------------------------------------------------------------
 def search_wikipedia(query: str, limit: int = 5, lang: str = "en") -> str:
-    """Search Wikipedia for articles matching a query."""
+    """Search Wikipedia for articles matching a query.
+
+    Entry point when the exact article title is unknown. Returns a ranked,
+    numbered list of matching titles with text snippets and URLs; feed the
+    chosen title to summary/article_extract/links next.
+    """
     try:
         limit = max(1, min(int(limit), 20))
     except (TypeError, ValueError):
@@ -168,7 +173,11 @@ def search_wikipedia(query: str, limit: int = 5, lang: str = "en") -> str:
 
 
 def get_summary(title: str, lang: str = "en") -> str:
-    """Get a Wikipedia article summary + thumbnail by title."""
+    """Get a concise summary + thumbnail of a Wikipedia article by exact title.
+
+    Fastest way to get the gist of a known topic. Use search first if the
+    exact title is unknown; article_extract for full text.
+    """
     resp = _get(f"{_base(lang)}/page/summary/{_slug(title)}")
     if resp.status_code == 404:
         return f"Article '{title}' not found on Wikipedia."
@@ -177,7 +186,7 @@ def get_summary(title: str, lang: str = "en") -> str:
 
 
 def get_random(lang: str = "en") -> str:
-    """Get a random Wikipedia article summary."""
+    """Get a summary of a random Wikipedia article (serendipitous discovery)."""
     resp = _get(f"{_base(lang)}/page/random/summary")
     resp.raise_for_status()
     return _summary_block(resp.json(), fallback_title="Random Article")
@@ -368,7 +377,7 @@ def article_sections(title: str, lang: str = "en") -> str:
 
 
 def featured_article(lang: str = "en") -> str:
-    """Get today's Wikipedia Featured Article (great content hook)."""
+    """Get today's Wikipedia Featured Article — editors' daily showcase pick."""
     resp = _get(f"{_base(lang)}/feed/featured/{_today()}")
     if resp.status_code == 404:
         return f"No featured article available for {lang}.wikipedia.org today."
@@ -1514,7 +1523,14 @@ def recent_changes(kind: str = "all", limit: int = 10, lang: str = "en") -> str:
 TOOLS = [
     {
         "name": "search",
-        "description": "Search Wikipedia for articles matching a query",
+        "description": (
+            "Search Wikipedia for articles matching a query — the entry point when you don't know "
+            "the exact article title. Returns a ranked, numbered list of matching articles, each with "
+            "a short text snippet and its Wikipedia URL (use `limit` for up to 20 results). Once you've "
+            "identified the right title, pass it to `summary` for the gist, `article_extract` for the "
+            "full text, or `links` to explore outward. Reports 'No results found' for empty queries "
+            "instead of erroring."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1536,7 +1552,12 @@ TOOLS = [
     },
     {
         "name": "summary",
-        "description": "Get a Wikipedia article summary + thumbnail by title",
+        "description": (
+            "Get a concise summary of a Wikipedia article by exact title, plus its lead thumbnail image "
+            "when one exists. The fastest way to get the gist of a known topic — e.g. 'Tyrannosaurus' or "
+            "'Albert_Einstein'. If you don't know the exact title, use `search` first to find it. For the "
+            "full article text use `article_extract`; for just the section outline use `article_sections`."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1556,7 +1577,12 @@ TOOLS = [
     },
     {
         "name": "random",
-        "description": "Get a random Wikipedia article summary",
+        "description": (
+            "Fetch a summary of a random Wikipedia article — serendipitous discovery across the entire "
+            "encyclopedia. Returns the same title + summary + thumbnail shape as `summary`, but for a "
+            "surprise topic. Ideal for exploration, icebreakers, trivia, and content inspiration when "
+            "there's no specific subject in mind; supports other languages via `lang`."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1665,7 +1691,13 @@ TOOLS = [
     },
     {
         "name": "featured_article",
-        "description": "Get today's Wikipedia Featured Article — a curated long-form pick, perfect for content hooks",
+        "description": (
+            "Get today's Wikipedia Featured Article — the single article Wikipedia's editors showcase as "
+            "the best of the encyclopedia that day. Returns the full long-form extract plus thumbnail: "
+            "reliably high-quality, surprising, in-depth content. A strong daily source of hooks and deep "
+            "dives; for the curated daily image instead use `picture_of_the_day`, and for today's "
+            "historical events use `on_this_day`."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
