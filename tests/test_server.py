@@ -566,9 +566,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 25 tools listed", len(server.TOOLS) == 25)
+    check("all 26 tools listed", len(server.TOOLS) == 26)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day", "recent_changes"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day", "recent_changes", "category_members"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -833,6 +833,43 @@ def main() -> int:
     check("dispatcher routes to recent_changes", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "**Recent changes on" in out, out[:200])
 
+    section("category_members")
+    out = server.category_members("Flightless birds", limit=5)
+    check("returns header", '**Articles in category "Flightless birds":**' in out, out[:200])
+    check("entries are bold titles", "- **" in out, out[:500])
+    check("entries have extracts", " — " in out, out[:800])
+    check("category link included", "en.wikipedia.org/wiki/Category:Flightless_birds" in out, out[-200:])
+    rows = [l for l in out.splitlines() if l.startswith("- **")]
+    check("respects limit=5", len(rows) <= 5, f"got {len(rows)} rows")
+
+    section("category_members — with Category: prefix")
+    out = server.category_members("Category:Flightless birds", limit=3)
+    check("prefix form works", '**Articles in category "Flightless birds":**' in out, out[:200])
+
+    section("category_members — missing category")
+    out = server.category_members("ThisCategoryDoesNotExist12345")
+    check("missing returns clear message", "No articles found" in out, out[:300])
+
+    section("category_members — empty category")
+    out = server.category_members("")
+    check("empty returns prompt", "provide a category name" in out, out[:200])
+
+    section("category_members — limit clamping")
+    out = server.category_members("Flightless birds", limit=100)
+    rows = [l for l in out.splitlines() if l.startswith("- **")]
+    check("limit=100 clamps to ≤50", len(rows) <= 50, f"got {len(rows)} rows")
+    out = server.category_members("Flightless birds", limit="abc")
+    check("non-int limit falls back (no crash)", "**Articles in category" in out, out[:200])
+
+    section("category_members — multi-language")
+    out = server.category_members("Vögel", limit=3, lang="de")
+    check("german category works", "**Articles in category" in out and "de.wikipedia.org" in out, out[:300])
+
+    section("category_members — dispatcher routing")
+    out = server._call_tool("category_members", {"category": "Flightless birds"})
+    check("dispatcher routes to category_members", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", out.startswith("**Articles in category"), out[:200])
+
     section("quote")
     out = server.quote()
     check("returns a quote", out.startswith("💬"), out[:200])
@@ -994,6 +1031,8 @@ def main() -> int:
             out = server._call_tool(name, {})
         elif name == "categories":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "category_members":
+            out = server._call_tool(name, {"category": "Flightless birds"})
         elif name == "links":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "backlinks":
