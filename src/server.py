@@ -1617,6 +1617,22 @@ TOOLS = [
             "Returns plain text (no HTML). Complements `summary`: use it "
             "when the summary is too brief and you want a fuller reading."
         ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus' or 'Albert_Einstein')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
     },
     {
         "name": "article_sections",
