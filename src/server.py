@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.14"
+SERVER_VERSION = "1.1.15"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -1508,6 +1508,74 @@ def recent_changes(kind: str = "all", limit: int = 10, lang: str = "en") -> str:
     return out
 
 
+def category_members(category: str, limit: int = 20, lang: str = "en") -> str:
+    """List Wikipedia articles filed under a category.
+
+    Returns the articles in a Wikipedia category — the reverse direction
+    of `categories` (which lists an article's categories). Each entry
+    includes a one-to-two sentence extract plus a thumbnail URL when one
+    exists, so the result is browsable at a glance.
+
+    Useful for taxonomy-based discovery: given "Machine learning
+    researchers" (found via `categories`), enumerate who's actually in
+    it; browse topics when search misses the long tail; build reading
+    lists. Filters to main-namespace articles so subcategories and files
+    don't pollute the result. The "Category:" prefix is optional.
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    cat = (category or "").strip()
+    if not cat:
+        return "Please provide a category name."
+    if not cat.lower().startswith("category:"):
+        cat = f"Category:{cat}"
+    params = {
+        "action": "query",
+        "generator": "categorymembers",
+        "gcmtitle": cat,
+        "gcmtype": "page",
+        "gcmsort": "sortkey",
+        "gcmlimit": limit,
+        "prop": "extracts|pageimages",
+        "exintro": 1,
+        "explaintext": 1,
+        "exsentences": 2,
+        "pithumbsize": 200,
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return (
+            f"No articles found in category '{category}' on {lang}.wikipedia.org — "
+            "the category may not exist or may be empty."
+        )
+
+    members = sorted(pages.values(), key=lambda p: p.get("title", ""))
+    display = cat.replace("Category:", "", 1)
+    out = f"**Articles in category \"{display}\":**\n\n"
+    for p in members:
+        title = p.get("title", "")
+        extract = (p.get("extract") or "").strip().replace("\n", " ")
+        thumb = ((p.get("thumbnail") or {}).get("source", "") or "").split("?")[0]
+        line = f"- **{title}**"
+        if extract:
+            line += f" — {extract}"
+        if thumb:
+            line += f"\n  ![thumbnail]({thumb})"
+        out += line + "\n"
+    out += (
+        f"\n[View category]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(cat)})"
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -2213,6 +2281,33 @@ TOOLS = [
             },
         },
     },
+    {
+        "name": "category_members",
+        "description": (
+            "List Wikipedia articles filed under a category — taxonomy-based discovery. The reverse direction of `categories` (which lists an article's categories): given 'Machine learning researchers', enumerate who's actually in it. Each entry includes a 1-2 sentence extract plus a thumbnail URL when one exists, so results are browsable at a glance. Filters to main-namespace articles so subcategories and files don't pollute the result. The 'Category:' prefix is optional. Pairs with `categories` (find the taxonomy) and `search` (find the entry point)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Category name, with or without the 'Category:' prefix (e.g. 'Flightless birds' or 'Category:Flightless birds')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max articles to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["category"],
+        },
+    },
 ]
 
 
@@ -2267,6 +2362,8 @@ def _call_tool(name: str, args: dict) -> str:
         return quote(**args)
     if name == "recent_changes":
         return recent_changes(**args)
+    if name == "category_members":
+        return category_members(**args)
     return f"Unknown tool: {name}"
 
 
