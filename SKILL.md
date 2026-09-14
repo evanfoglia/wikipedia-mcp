@@ -37,6 +37,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `media_list` | All media (images, videos, audio) in an article — full inventory with type, caption, and thumbnail |
 | `quote` | Random notable quote from a curated list of famous authors |
 | `recent_changes` | Most recent changes to Wikipedia articles (live feed) — filter by 'all', 'edit', 'new', 'categorize', or 'log' |
+| `category_members` | Articles filed under a category (reverse of `categories`) — taxonomy-based discovery, each entry with a 1–2 sentence extract + thumbnail |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
