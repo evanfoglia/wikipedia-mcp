@@ -2,6 +2,8 @@
 
 A Model Context Protocol (MCP) server that provides access to Wikipedia via the free REST API. No API key required.
 
+⭐ If you find this useful, please star the repo — it helps others discover it.
+
 ## Tools
 
 | Tool | Description |
