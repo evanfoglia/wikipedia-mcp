@@ -1039,6 +1039,17 @@ def main() -> int:
         out,
     )
 
+    section("tool schemas — every tool declares inputSchema")
+    # Strict MCP clients (e.g. Glama's checks) reject tools/list entries
+    # without an inputSchema object, so this must never regress.
+    for t in server.TOOLS:
+        schema = t.get("inputSchema")
+        check(
+            f"'{t['name']}' has inputSchema object",
+            isinstance(schema, dict) and schema.get("type") == "object",
+            f"got: {schema!r}",
+        )
+
     print(f"\n{PASS} passed, {FAIL} failed")
     return 0 if FAIL == 0 else 1
 
