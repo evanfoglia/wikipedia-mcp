@@ -566,9 +566,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 26 tools listed", len(server.TOOLS) == 26)
+    check("all 27 tools listed", len(server.TOOLS) == 27)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day", "recent_changes", "category_members"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day", "recent_changes", "category_members", "infobox"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -870,6 +870,36 @@ def main() -> int:
     check("dispatcher routes to category_members", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Articles in category"), out[:200])
 
+    section("infobox")
+    out = server.infobox("Albert Einstein")
+    check("returns table header", "## Albert Einstein — infobox" in out, out[:200])
+    check("markdown table present", "| Field | Value |" in out, out[:400])
+    check("birth_date rendered as date", "| birth_date | 1879-3-14 |" in out, out[:600])
+    check("wikilinks flattened", "Hans Albert |" in out, out[:800])
+    check("no raw ref tags", "<ref" not in out, out[:1500])
+    check("article link included", "en.wikipedia.org/wiki/Albert_Einstein" in out, out[-200:])
+
+    section("infobox — missing article")
+    out = server.infobox("xyzzynonesuch")
+    check("missing returns clear message", "No article found" in out, out[:200])
+
+    section("infobox — empty title")
+    out = server.infobox("")
+    check("empty returns prompt", "provide an article title" in out, out[:200])
+
+    section("infobox — no infobox on page")
+    out = server.infobox("Mercury (disambiguation)")
+    check("no-infobox returns guidance", "No infobox found" in out, out[:200])
+
+    section("infobox — multi-language")
+    out = server.infobox("Albert Einstein", lang="de")
+    check("german infobox works", "infobox" in out and "de.wikipedia.org" in out, out[:300])
+
+    section("infobox — dispatcher routing")
+    out = server._call_tool("infobox", {"title": "Paris"})
+    check("dispatcher routes to infobox", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "— infobox" in out, out[:200])
+
     section("quote")
     out = server.quote()
     check("returns a quote", out.startswith("💬"), out[:200])
@@ -1033,6 +1063,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "category_members":
             out = server._call_tool(name, {"category": "Flightless birds"})
+        elif name == "infobox":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "links":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "backlinks":

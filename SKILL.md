@@ -38,6 +38,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `quote` | Random notable quote from a curated list of famous authors |
 | `recent_changes` | Most recent changes to Wikipedia articles (live feed) — filter by 'all', 'edit', 'new', 'categorize', or 'log' |
 | `category_members` | Articles filed under a category (reverse of `categories`) — taxonomy-based discovery, each entry with a 1–2 sentence extract + thumbnail |
+| `infobox` | An article's structured fact box as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
@@ -121,6 +122,7 @@ mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus", "limit": 50}'
 mcporter call wikipedia quote
+mcporter call wikipedia infobox --args '{"title": "Albert Einstein"}'
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
 
@@ -130,11 +132,12 @@ Uses Wikipedia's free public REST API — no API key required.
 
 - Search: MediaWiki Action API
 - External links: MediaWiki Action API (`prop=extlinks`)
+- Infobox: MediaWiki Action API (`action=parse` + `prop=wikitext`), with local wikitext parsing (no new dependencies)
 - Summary / Random / Featured / Picture of the Day: REST API v1 (`/api/rest_v1/...`)
 
 ## Notes
 
-- User-Agent is `wikipedia-mcp/1.1.13` per Wikipedia API etiquette
+- User-Agent is `wikipedia-mcp/1.1.17` per Wikipedia API etiquette
 - All responses include links back to the source article
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
@@ -153,6 +156,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `top_reads` returns the most-viewed articles on Wikipedia for a given date (default yesterday UTC) — answers "what is everyone reading right now" while `pageviews` answers "how is this specific article trending". Filters out Main_Page, Special:Search, Portal:Current_events, etc. so the result is real articles only.
 - `image` returns the article's lead image as URLs (300px thumbnail + full-size original) without summary prose — useful for embedding the image elsewhere (cards, slide decks, Telegram hero images). `summary` embeds the thumbnail inline; `image` exposes both URLs separately.
 - `media_list` returns every media item (images, videos, audio) the article uses — not just the lead thumbnail. Each entry has file title, type, caption, and thumbnail URL; lead media is marked with 🏆 so callers can skip it when they already have it via `image`. Uses Wikipedia's REST `/page/media-list` endpoint (structured JSON, no HTML parsing). Pairs with `image` (lead only) — use `image` for the headline thumbnail, `media_list` for the full inventory (gallery generation, fact-checking, slide decks, audits).
+- `infobox` returns the article's structured fact box as a markdown field/value table — the fastest path to a concrete fact ("who founded X?", "population of Y?") without reading prose. Parses raw wikitext from the read-only parse API locally (balanced-brace template extraction, no new dependencies): wikilinks flatten to plain text, citations/HTML are stripped, nested templates collapse to their values, birth/death-date templates render as `YYYY-M-D`. Fields capped at 50, values at 400 chars. Reports clearly when an article has no infobox. Pairs with `summary` (prose gist) and `article_extract` (full text) — use `infobox` for facts, the others for narrative.
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub

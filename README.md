@@ -34,6 +34,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `quote` | Get a random notable quote from a curated list of famous authors |
 | `recent_changes` | Live window into Wikipedia right now — most recent edits, with kind filter ('all', 'edit', 'new', 'categorize', 'log') for breaking-news edits, newly published articles, and more |
 | `category_members` | List articles filed under a category — taxonomy-based discovery, the reverse of `categories`; each entry has a 1–2 sentence extract + thumbnail |
+| `infobox` | Extract an article's structured fact box (infobox) as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact without reading prose |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 

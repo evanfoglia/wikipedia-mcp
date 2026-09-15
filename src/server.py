@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.16"
+SERVER_VERSION = "1.1.17"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -109,6 +109,124 @@ def _strip_html(s: str) -> str:
 
 def _slug(title: str) -> str:
     return title.strip().replace(" ", "_")
+
+
+# ---------------------------------------------------------------------------
+# Infobox helpers — parse raw wikitext templates without new dependencies.
+# ---------------------------------------------------------------------------
+_INFOBOX_RE = re.compile(r"\{\{\s*[Ii]nfobox")
+
+
+def _extract_template(wt: str, start: int):
+    """Extract a template starting at wt[start:start+2] == '{{'.
+
+    Returns (name, body, end_index) with balanced-brace matching; name is
+    the text before the first top-level '|' (or the whole body if none).
+    """
+    depth = 0
+    i, n = start, len(wt)
+    while i < n - 1:
+        if wt[i:i + 2] == "{{":
+            depth += 1
+            i += 2
+        elif wt[i:i + 2] == "}}":
+            depth -= 1
+            i += 2
+            if depth == 0:
+                inner = wt[start + 2:i - 2]
+                m = re.match(r"\s*([^|}]+)", inner)
+                name = m.group(1).strip() if m else ""
+                body = inner[len(m.group(0)):] if m else inner
+                return name, body, i
+        else:
+            i += 1
+    return None, None, n
+
+
+def _split_top_level(s: str):
+    """Split s on '|' characters not nested inside {{...}} or [[...]]."""
+    parts, tdepth, bdepth, cur = [], 0, 0, ""
+    i, n = 0, len(s)
+    while i < n:
+        if s[i:i + 2] == "{{":
+            tdepth += 1
+            cur += "{{"
+            i += 2
+        elif s[i:i + 2] == "}}":
+            tdepth -= 1
+            cur += "}}"
+            i += 2
+        elif s[i] == "[":
+            bdepth += 1
+            cur += "["
+            i += 1
+        elif s[i] == "]":
+            bdepth -= 1
+            cur += "]"
+            i += 1
+        elif s[i] == "|" and tdepth == 0 and bdepth == 0:
+            parts.append(cur)
+            cur = ""
+            i += 1
+        else:
+            cur += s[i]
+            i += 1
+    parts.append(cur)
+    return parts
+
+
+# Date templates take (year, month, day) positionally — join with "-" so
+# birth/death fields read as dates instead of comma-separated numbers.
+_DATE_TEMPLATES = frozenset({
+    "birth date", "birth date and age", "death date", "death date and age",
+})
+
+
+def _clean_infobox_value(v: str) -> str:
+    """Render a raw wikitext infobox value as readable plain text."""
+    v = re.sub(r"<ref[^>]*>.*?</ref>", "", v, flags=re.DOTALL)  # citations
+    v = re.sub(r"<ref[^>]*/>", "", v)
+    v = v.replace("<br>", ", ").replace("<br/>", ", ").replace("<br />", ", ")
+    v = re.sub(r"<[^>]+>", "", v)
+    v = unescape(v)
+
+    def _tmpl(m):
+        # Drop named params (df=yes, end=divorced, P548=Q2804309) and
+        # pure wikidata tokens (P123); join positional params with ", ".
+        params = _split_top_level(m.group(0)[2:-2])
+        name = (params[0].strip().lower() if params else "")
+        if name == "wikidata":
+            return ""  # value is fetched from Wikidata at render time,
+                       # not present in the wikitext — drop, don't show noise
+        kept = [
+            p.strip()
+            for p in params[1:]
+            if p.strip() and "=" not in p and not re.fullmatch(r"[PQ]\d+", p.strip())
+        ]
+        if name in _DATE_TEMPLATES and len(kept) >= 3:
+            return "-".join(kept[:3])  # 1879-3-14, not "1879, 3, 14"
+        return ", ".join(kept)
+
+    prev = None
+    while prev != v:  # innermost templates first, until none remain
+        prev = v
+        v = re.sub(r"\{\{[^{}]*\}\}", _tmpl, v)
+    v = re.sub(r"\[\[([^|\]]+)\|([^\]]+)\]\]", r"\2", v)  # [[Page|text]] -> text
+    v = re.sub(r"\[\[([^\]]+)\]\]", r"\1", v)  # [[Page]] -> Page
+    v = v.replace("'''", "").replace("''", "")
+    v = re.sub(r"(^|\s)\*\s*", r"\1• ", v)  # wikitext bullets -> bullet chars
+    v = re.sub(r"\s+", " ", v).strip(" ,;•")
+    return v
+
+
+def _find_infoboxes(wt: str):
+    """Return [(name, body)] for every {{Infobox ...}} template in wikitext."""
+    boxes = []
+    for m in _INFOBOX_RE.finditer(wt):
+        name, body, _ = _extract_template(wt, m.start())
+        if name and name.lower().startswith("infobox"):
+            boxes.append((name, body))
+    return boxes
 
 
 def _summary_block(data: dict, fallback_title: str) -> str:
@@ -1585,6 +1703,92 @@ def category_members(category: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+# Max infobox fields rendered, and max chars per value — keeps huge
+# infoboxes (city articles can have 60+ fields) from flooding the model.
+INFOBOX_MAX_FIELDS = 50
+INFOBOX_MAX_VALUE_LEN = 400
+
+
+def infobox(title: str, lang: str = "en") -> str:
+    """Extract the structured fact box (infobox) from a Wikipedia article.
+
+    Returns the article's infobox as a markdown field/value table: the
+    structured facts editors curate at the top-right of the page — dates,
+    people, places, statistics, founders, CEOs, populations, capitals.
+    This is the fastest path to a concrete fact ("who founded X?", "what's
+    the population of Y?") without wading through article prose.
+
+    Uses the read-only parse API to fetch raw wikitext, extracts the first
+    {{Infobox ...}} template with balanced-brace matching, and renders each
+    |field = value| pair as plain text (wikilinks become plain text,
+    citations and HTML are stripped, nested templates are flattened to
+    their positional values). Fields are capped at 50 and values at 400
+    characters. Reports clearly when the article has no infobox.
+
+    Pairs with `summary` (prose gist) and `article_extract` (full text):
+    use `infobox` when you want facts, the others when you want narrative.
+    """
+    title = (title or "").strip()
+    if not title:
+        return "Please provide an article title."
+    lang = lang if lang in SUPPORTED_LANGS else "en"
+    params = {
+        "action": "parse",
+        "page": title,
+        "prop": "wikitext",
+        "redirects": 1,
+        "format": "json",
+        "formatversion": "2",
+    }
+    try:
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return f"Could not fetch infobox for '{title}': {e}"
+    if "error" in data:
+        return (
+            f"No article found for '{title}' on {lang}.wikipedia.org — "
+            "check the title with `search` first."
+        )
+    parsed = data.get("parse", {})
+    canon = parsed.get("title", title)
+    boxes = _find_infoboxes(parsed.get("wikitext", ""))
+    if not boxes:
+        return (
+            f"No infobox found on '{canon}' ({lang}.wikipedia.org). "
+            "Not every article has one — try `summary` or `article_extract` "
+            "for this topic instead."
+        )
+    name, body = boxes[0]
+    fields = []
+    for part in _split_top_level(body)[1:]:  # [0] is the template name
+        if "=" not in part:
+            continue
+        key, _, value = part.partition("=")
+        key = key.strip()
+        value = _clean_infobox_value(value)
+        if key and value and not any(f[0] == key for f in fields):
+            fields.append((key, value))
+    if not fields:
+        return f"The infobox on '{canon}' has no readable fields."
+
+    out = f"## {canon} — infobox (`{name}`)\n\n"
+    if len(boxes) > 1:
+        out += f"_{len(boxes)} infoboxes found; showing the first._\n\n"
+    out += "| Field | Value |\n|---|---|\n"
+    for key, value in fields[:INFOBOX_MAX_FIELDS]:
+        if len(value) > INFOBOX_MAX_VALUE_LEN:
+            value = value[:INFOBOX_MAX_VALUE_LEN].rstrip() + "…"
+        key = key.replace("|", "\\|")
+        value = value.replace("\n", " ").replace("|", "\\|")
+        out += f"| {key} | {value} |\n"
+    if len(fields) > INFOBOX_MAX_FIELDS:
+        out += f"\n_…and {len(fields) - INFOBOX_MAX_FIELDS} more fields._\n"
+    out += f"\n[View article](https://{lang}.wikipedia.org/wiki/{_slug(canon)})"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -2356,6 +2560,33 @@ TOOLS = [
             "required": ["category"],
         },
     },
+    {
+        "name": "infobox",
+        "description": (
+            "Extract the structured fact box (infobox) from a Wikipedia article as a field/value "
+            "table — dates, people, places, statistics, founders, CEOs, populations, capitals. The "
+            "fastest path to a concrete fact ('who founded X?', 'what's the population of Y?') without "
+            "wading through prose. Renders wikitext into clean plain text (citations stripped, links "
+            "flattened, fields capped at 50). Use this for facts; use `summary` for the prose gist and "
+            "`article_extract` for full text. Reports clearly when an article has no infobox."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Albert Einstein' or 'Paris')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -2412,6 +2643,8 @@ def _call_tool(name: str, args: dict) -> str:
         return recent_changes(**args)
     if name == "category_members":
         return category_members(**args)
+    if name == "infobox":
+        return infobox(**args)
     return f"Unknown tool: {name}"
 
 
