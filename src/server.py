@@ -1516,6 +1516,161 @@ def media_list(title: str, limit: int = 25, lang: str = "en") -> str:
     return out
 
 
+_COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+
+# CirrusSearch filetype filter per media_search() filetype argument.
+# "image" covers both bitmap photos and drawings/SVGs (diagrams, maps).
+_FILETYPE_FILTER = {
+    "image": "filetype:bitmap|drawing",
+    "video": "filetype:video",
+    "audio": "filetype:audio",
+}
+
+
+# Commons sometimes reports generic mime types (e.g. application/ogg for
+# both .oga audio and .ogv video), so fall back to the file extension when
+# the mime type doesn't name a media kind directly.
+_MEDIA_KIND_BY_EXT = {
+    "jpg": "image", "jpeg": "image", "png": "image", "gif": "image",
+    "svg": "image", "tif": "image", "tiff": "image", "webp": "image",
+    "xcf": "image", "pdf": "document",
+    "webm": "video", "mp4": "video", "ogv": "video", "mov": "video",
+    "ogg": "audio", "oga": "audio", "opus": "audio", "flac": "audio",
+    "wav": "audio", "mp3": "audio", "mid": "audio", "midi": "audio",
+}
+
+
+def _media_kind(mime: str, title: str) -> str:
+    m = (mime or "").lower()
+    if m.startswith(("image/", "video/", "audio/")):
+        return m.split("/")[0]
+    ext = title.rsplit(".", 1)[-1].lower() if "." in title else ""
+    return _MEDIA_KIND_BY_EXT.get(ext, "media")
+
+
+def media_search(query: str, limit: int = 10, filetype: str = "image") -> str:
+    """Search Wikimedia Commons for freely-licensed media by keyword.
+
+    Full-text search across the Commons media library (File: namespace)
+    — the first tool in this skill that finds media by *topic* instead of
+    by article. `image` returns only the lead image of a known article and
+    `media_list` inventories media already used in an article; neither
+    helps when you need an illustration for a topic with no article yet
+    (a blog post, slide deck, README hero image, Wiki Rabbit Hole node).
+    `media_search` fills that gap: give it a keyword, get back real files
+    you can hotlink.
+
+    Everything on Commons is freely licensed, and each result reports its
+    license short name, the artist/uploader, a thumbnail URL (320px), the
+    full-resolution URL, and a link to the file page — enough to embed
+    and attribute correctly. `filetype` filters the result set:
+    "image" (default, photos + diagrams/SVGs), "video", "audio", or "all".
+
+    `limit` clamps the number of results (default 10, max 50).
+    Uses the read-only Commons action API (generator=search on the File:
+    namespace) — no new dependencies, same descriptive User-Agent.
+    """
+    if not query or not query.strip():
+        return "Please provide a search query (e.g. media_search('aurora borealis'))."
+    query = query.strip()
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 10
+
+    filetype = (filetype or "image").lower()
+    if filetype not in ("image", "video", "audio", "all"):
+        return (
+            f"Invalid filetype '{filetype}'. "
+            "Use 'image', 'video', 'audio', or 'all'."
+        )
+
+    gsrsearch = query
+    if filetype in _FILETYPE_FILTER:
+        gsrsearch = f"{query} {_FILETYPE_FILTER[filetype]}"
+
+    params = {
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": gsrsearch,
+        "gsrnamespace": 6,
+        "gsrlimit": limit,
+        "prop": "imageinfo",
+        "iiprop": "url|size|mime|extmetadata",
+        "iiurlwidth": 320,
+        "iiextmetadatafilter": "ImageDescription|Artist|LicenseShortName",
+        "format": "json",
+        "formatversion": "2",
+    }
+    resp = _get(_COMMONS_API, params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    pages = (data.get("query") or {}).get("pages", [])
+    if not pages:
+        return (
+            f"No media found on Wikimedia Commons for '{query}'"
+            + (f" (filetype '{filetype}')" if filetype != "all" else "")
+            + "."
+        )
+
+    # API doesn't guarantee result order; keep it stable by title.
+    pages = sorted(pages, key=lambda p: p.get("title", ""))[:limit]
+
+    out = (
+        f"## Media search: \"{query}\" "
+        f"({len(pages)} result{'s' if len(pages) != 1 else ''}, "
+        f"filetype: {filetype})\n\n"
+    )
+    for page in pages:
+        file_title = page.get("title", "Unknown")
+        info = (page.get("imageinfo") or [{}])[0]
+        mime = info.get("mime", "")
+        kind = _media_kind(mime, file_title)
+        width = info.get("width")
+        height = info.get("height")
+        dims = f"{width}×{height}" if width and height else "unknown size"
+        # imageinfo URLs carry ?utm_source=... tracking params; strip them.
+        full_url = (info.get("url") or "").split("?")[0]
+        thumb_url = (info.get("thumburl") or "").split("?")[0]
+        file_page = (
+            "https://commons.wikimedia.org/wiki/"
+            + file_title.replace(" ", "_")
+        )
+
+        meta = info.get("extmetadata") or {}
+        license_name = (meta.get("LicenseShortName") or {}).get("value", "")
+        artist = _strip_html(
+            (meta.get("Artist") or {}).get("value", "")
+        ).strip()
+        desc = _strip_html(
+            (meta.get("ImageDescription") or {}).get("value", "")
+        ).strip()
+
+        out += f"- **{file_title}**\n"
+        out += f"  Type: {kind} ({dims})\n"
+        if license_name:
+            out += f"  License: {license_name}\n"
+        if artist:
+            artist_display = (
+                artist[:120] + ("..." if len(artist) > 120 else "")
+            )
+            out += f"  Artist: {artist_display}\n"
+        if desc:
+            desc_display = desc[:200] + ("..." if len(desc) > 200 else "")
+            out += f"  Description: {desc_display}\n"
+        if thumb_url:
+            out += f"  Thumbnail (320px): {thumb_url}\n"
+        if full_url:
+            out += f"  Full size: {full_url}\n"
+        out += f"  [Commons file page →]({file_page})\n\n"
+
+    out += (
+        "All files are freely licensed — check the license on the file "
+        "page before reuse."
+    )
+    return out
+
+
 def quote(lang: str = "en") -> str:
     """Get a random notable quote from a curated list of famous authors.
 
@@ -2469,6 +2624,44 @@ TOOLS = [
         },
     },
     {
+        "name": "media_search",
+        "description": (
+            "Search Wikimedia Commons for freely-licensed media by "
+            "keyword — the topic-based counterpart to `image` (lead image "
+            "of a known article) and `media_list` (media already used in "
+            "an article). Give it a topic ('aurora borealis', 'vintage "
+            "trains') and get back real Commons files with thumbnail and "
+            "full-size URLs, dimensions, license, and artist — ready to "
+            "embed in cards, posts, slide decks, or README hero images. "
+            "`filetype` filters to 'image' (default: photos + diagrams / "
+            "SVGs), 'video', 'audio', or 'all'. Commons is "
+            "language-independent, so this tool takes no `lang` "
+            "parameter. Everything returned is freely licensed; check the "
+            "license on the file page before reuse."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Media search keywords (e.g. 'aurora borealis' or 'steam locomotive')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results to return (default 10, max 50)",
+                    "default": 10,
+                },
+                "filetype": {
+                    "type": "string",
+                    "description": "Media type filter: 'image' (photos + diagrams/SVGs), 'video', 'audio', or 'all'",
+                    "default": "image",
+                    "enum": ["image", "video", "audio", "all"],
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "quote",
         "description": (
             "Get a random notable quote from a curated list of famous "
@@ -2637,6 +2830,8 @@ def _call_tool(name: str, args: dict) -> str:
         return image(**args)
     if name == "media_list":
         return media_list(**args)
+    if name == "media_search":
+        return media_search(**args)
     if name == "quote":
         return quote(**args)
     if name == "recent_changes":

@@ -35,12 +35,13 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `top_reads` | Most-read articles on Wikipedia for a given date (trending discovery) |
 | `image` | Lead image for an article — thumbnail + original URLs, no summary text |
 | `media_list` | All media (images, videos, audio) in an article — full inventory with type, caption, and thumbnail |
+| `media_search` | Search Wikimedia Commons for freely-licensed media by keyword — topic-based discovery (`filetype`: image/video/audio/all) |
 | `quote` | Random notable quote from a curated list of famous authors |
 | `recent_changes` | Most recent changes to Wikipedia articles (live feed) — filter by 'all', 'edit', 'new', 'categorize', or 'log' |
 | `category_members` | Articles filed under a category (reverse of `categories`) — taxonomy-based discovery, each entry with a 1–2 sentence extract + thumbnail |
 | `infobox` | An article's structured fact box as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact |
 
-All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
+All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
 ## Installation
 
@@ -121,6 +122,8 @@ mcporter call wikipedia top_reads --args '{"date": "20260101", "limit": 15}'
 mcporter call wikipedia image --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus", "limit": 50}'
+mcporter call wikipedia media_search --args '{"query": "aurora borealis"}'
+mcporter call wikipedia media_search --args '{"query": "volcano eruption", "filetype": "video", "limit": 5}'
 mcporter call wikipedia quote
 mcporter call wikipedia infobox --args '{"title": "Albert Einstein"}'
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
@@ -156,6 +159,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `top_reads` returns the most-viewed articles on Wikipedia for a given date (default yesterday UTC) — answers "what is everyone reading right now" while `pageviews` answers "how is this specific article trending". Filters out Main_Page, Special:Search, Portal:Current_events, etc. so the result is real articles only.
 - `image` returns the article's lead image as URLs (300px thumbnail + full-size original) without summary prose — useful for embedding the image elsewhere (cards, slide decks, Telegram hero images). `summary` embeds the thumbnail inline; `image` exposes both URLs separately.
 - `media_list` returns every media item (images, videos, audio) the article uses — not just the lead thumbnail. Each entry has file title, type, caption, and thumbnail URL; lead media is marked with 🏆 so callers can skip it when they already have it via `image`. Uses Wikipedia's REST `/page/media-list` endpoint (structured JSON, no HTML parsing). Pairs with `image` (lead only) — use `image` for the headline thumbnail, `media_list` for the full inventory (gallery generation, fact-checking, slide decks, audits).
+- `media_search` is the topic-based counterpart to `image`/`media_list`: full-text search across Wikimedia Commons' File: namespace by keyword, so you can find freely-licensed media for a topic with no article yet (blog posts, slide decks, README hero images). Each result has file title, media type + dimensions, 320px thumbnail and full-size URLs, license short name, artist, description snippet, and a Commons file-page link. `filetype` filters to `image` (default: photos + diagrams/SVGs), `video`, `audio`, or `all`; limit clamps to 50. Uses the read-only Commons action API (generator=search) — GET-only, no new dependencies. Language-independent, so no `lang` parameter.
 - `infobox` returns the article's structured fact box as a markdown field/value table — the fastest path to a concrete fact ("who founded X?", "population of Y?") without reading prose. Parses raw wikitext from the read-only parse API locally (balanced-brace template extraction, no new dependencies): wikilinks flatten to plain text, citations/HTML are stripped, nested templates collapse to their values, birth/death-date templates render as `YYYY-M-D`. Fields capped at 50, values at 400 chars. Reports clearly when an article has no infobox. Pairs with `summary` (prose gist) and `article_extract` (full text) — use `infobox` for facts, the others for narrative.
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 

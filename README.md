@@ -31,12 +31,13 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `top_reads` | Get the most-read articles on Wikipedia for a given date |
 | `image` | Get just the lead image (thumbnail + original URLs) for an article, no summary text |
 | `media_list` | List all media (images, videos, audio) used in an article — full inventory with type, caption, and thumbnail |
+| `media_search` | Search Wikimedia Commons for freely-licensed media by keyword (topic-based discovery — `filetype`: image/video/audio/all) |
 | `quote` | Get a random notable quote from a curated list of famous authors |
 | `recent_changes` | Live window into Wikipedia right now — most recent edits, with kind filter ('all', 'edit', 'new', 'categorize', 'log') for breaking-news edits, newly published articles, and more |
 | `category_members` | List articles filed under a category — taxonomy-based discovery, the reverse of `categories`; each entry has a 1–2 sentence extract + thumbnail |
 | `infobox` | Extract an article's structured fact box (infobox) as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact without reading prose |
 
-All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`). Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
+All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
 ## Setup
 
@@ -136,6 +137,10 @@ mcporter call wikipedia image --args '{"title": "Tyrannosaurus", "lang": "de"}'
 mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia media_list --args '{"title": "Tyrannosaurus", "limit": 50}'
 mcporter call wikipedia media_list --args '{"title": "Berlin", "lang": "de"}'
+
+# Media search — freely-licensed Commons media by keyword (topic-based, not article-based)
+mcporter call wikipedia media_search --args '{"query": "aurora borealis"}'
+mcporter call wikipedia media_search --args '{"query": "volcano eruption", "filetype": "video", "limit": 5}'
 
 # Random notable quote (curated list of famous authors)
 mcporter call wikipedia quote
