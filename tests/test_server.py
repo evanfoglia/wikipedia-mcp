@@ -566,9 +566,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 27 tools listed", len(server.TOOLS) == 27)
+    check("all 28 tools listed", len(server.TOOLS) == 28)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "quote", "picture_of_the_day", "recent_changes", "category_members", "infobox"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "recent_changes", "category_members", "infobox"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1018,6 +1018,59 @@ def main() -> int:
         out[:200],
     )
 
+    section("media_search")
+    out = server.media_search("aurora borealis", limit=3)
+    check("returns header", "Media search" in out and "aurora borealis" in out, out[:300])
+    check("lists File: entries", "File:" in out, out[:500])
+    check("shows Type: field", "Type: image" in out, out[:500])
+    check("thumbnail URL on upload.wikimedia.org", "upload.wikimedia.org" in out, out[:800])
+    check("full-size URL present", "Full size:" in out, out[:800])
+    check("Commons file page link", "commons.wikimedia.org/wiki/File:" in out, out[:800])
+
+    section("media_search — filetype filters")
+    out = server.media_search("volcano eruption", limit=3, filetype="video")
+    check("video filter header", "filetype: video" in out, out[:300])
+    video_lines = [l for l in out.splitlines() if l.startswith("  Type:")]
+    check("results are videos", len(video_lines) >= 1 and all("video" in l for l in video_lines), "\n".join(video_lines)[:300])
+    out = server.media_search("thunderstorm", limit=3, filetype="audio")
+    audio_lines = [l for l in out.splitlines() if l.startswith("  Type:")]
+    check("audio filter returns audio", len(audio_lines) >= 1 and all("audio" in l for l in audio_lines), "\n".join(audio_lines)[:300])
+
+    section("media_search — limit clamping + type safety")
+    out = server.media_search("aurora borealis", limit=999)
+    file_count = sum(1 for line in out.splitlines() if line.startswith("- **File:"))
+    check("limit=999 clamps to ≤50", file_count <= 50, f"got {file_count}")
+    out = server.media_search("aurora borealis", limit=-5)
+    file_count = sum(1 for line in out.splitlines() if line.startswith("- **File:"))
+    check("limit=-5 clamps to ≥1", file_count >= 1, f"got {file_count}")
+    out = server.media_search("aurora borealis", limit="abc")
+    check(
+        "non-int limit returns media (no crash)",
+        "Media search" in out and "aurora borealis" in out,
+        out[:300],
+    )
+
+    section("media_search — invalid filetype")
+    out = server.media_search("aurora borealis", filetype="hologram")
+    check("invalid filetype rejected", "Invalid filetype" in out, out[:200])
+
+    section("media_search — no results")
+    out = server.media_search("xyzzynonesuchquery")
+    check("graceful empty", "No media found" in out, out[:200])
+
+    section("media_search — empty query")
+    out = server.media_search("")
+    check("empty query asks for one", "search query" in out, out[:200])
+
+    section("media_search — dispatcher routing")
+    out = server._call_tool("media_search", {"query": "aurora borealis", "limit": 2})
+    check("dispatcher routes to media_search", "Unknown tool" not in out, out[:200])
+    check(
+        "dispatcher returned real content",
+        "Media search" in out and "aurora borealis" in out,
+        out[:200],
+    )
+
     section("language validation fallback")
     # _base() and _wiki() silently coerce unsupported langs to "en" so a
     # bad/typo'd lang string can't route a request to the wrong Wikipedia.
@@ -1087,6 +1140,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "media_list":
             out = server._call_tool(name, {"title": "Velociraptor", "limit": 3})
+        elif name == "media_search":
+            out = server._call_tool(name, {"query": "aurora borealis", "limit": 2})
         else:
             out = server._call_tool(name, {})
         check(
