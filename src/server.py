@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.17"
+SERVER_VERSION = "1.1.18"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -1945,6 +1945,86 @@ def infobox(title: str, lang: str = "en") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Article quality — Wikipedia's own quality assessments (WikiProject grades).
+# ---------------------------------------------------------------------------
+# Quality ladder. FA/FL = featured (Wikipedia's best), A = near-featured,
+# GA = good article, B/C = developed, Start = basic, Stub = minimal.
+_QUALITY_RANK = {
+    "FA": 7, "FL": 7,  # featured article / featured list
+    "A": 6,
+    "GA": 5,  # good article
+    "B": 4,
+    "C": 3,
+    "Start": 2,
+    "Stub": 1,
+}
+_QUALITY_LEGEND = "FA/FL (featured) > A > GA (good) > B > C > Start > Stub"
+
+
+def article_quality(title: str, lang: str = "en") -> str:
+    """Get Wikipedia's quality assessments for an article.
+
+    Reports the WikiProject quality grades (FA, GA, B, C, Start, Stub) and
+    importance ratings assigned to an article — the encyclopedia's own
+    trust/quality signal. Useful before relying on an article: a GA/FA has
+    passed formal review, a Stub is a skeleton. Aggregates an overall class
+    (the best grade any project assigned) plus the per-project breakdown.
+    Uses the read-only pageassessments action API. Note: assessment is only
+    enabled on some language editions (e.g. en); others report no data.
+    """
+    params = {
+        "action": "query",
+        "prop": "pageassessments",
+        "titles": title,
+        "format": "json",
+        "origin": "*",
+    }
+    assessments: dict = {}
+    canon = title
+    for _ in range(5):  # follow continuation; big articles span many projects
+        resp = _get(_wiki(lang), params=params)
+        if resp.status_code == 404:
+            return f"Article '{title}' not found on Wikipedia."
+        resp.raise_for_status()
+        data = resp.json()
+        pages = data.get("query", {}).get("pages", {})
+        if not pages:
+            break
+        page = next(iter(pages.values()))
+        if page.get("missing") is not None:
+            return f"Article '{title}' not found on Wikipedia."
+        canon = page.get("title", title)
+        assessments.update(page.get("pageassessments", {}) or {})
+        cont = data.get("continue", {})
+        if "pacontinue" not in cont:
+            break
+        params["pacontinue"] = cont["pacontinue"]
+    if not assessments:
+        return (
+            f"No quality assessments recorded for '{canon}' on "
+            f"{lang}.wikipedia.org. (Article assessment isn't enabled on every "
+            f"language edition — try `lang='en'`.)"
+        )
+
+    rows = []
+    for project in sorted(assessments):
+        a = assessments[project] or {}
+        cls = (a.get("class") or "Unassessed").strip()
+        imp = (a.get("importance") or "").strip() or "—"
+        rows.append((project, cls, imp))
+    overall = max(rows, key=lambda r: _QUALITY_RANK.get(r[1], -1))[1]
+
+    out = f"**Quality assessments for \"{canon}\":**\n\n"
+    out += f"Overall class: **{overall}**\n"
+    out += f"_{_QUALITY_LEGEND}_\n\n"
+    out += "| WikiProject | Class | Importance |\n|---|---|---|\n"
+    for project, cls, imp in rows:
+        out += f"| {project} | {cls} | {imp} |\n"
+    out += f"\n[View article](https://{lang}.wikipedia.org/wiki/{_slug(canon)})"
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -2780,6 +2860,34 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "article_quality",
+        "description": (
+            "Get Wikipedia's quality assessments for an article — the WikiProject grades "
+            "(FA, GA, B, C, Start, Stub) and importance ratings assigned by editors. The "
+            "encyclopedia's own trust signal: use it before relying on an article (a GA/FA "
+            "passed formal review; a Stub is a skeleton). Reports an overall class plus the "
+            "per-project breakdown with a quality-ladder legend. Assessment is enabled per "
+            "language edition (en works; some editions like de report no data). Read-only "
+            "via the pageassessments action API — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Albert Einstein' or 'Paris')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -2840,6 +2948,8 @@ def _call_tool(name: str, args: dict) -> str:
         return category_members(**args)
     if name == "infobox":
         return infobox(**args)
+    if name == "article_quality":
+        return article_quality(**args)
     return f"Unknown tool: {name}"
 
 
