@@ -36,6 +36,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `recent_changes` | Live window into Wikipedia right now — most recent edits, with kind filter ('all', 'edit', 'new', 'categorize', 'log') for breaking-news edits, newly published articles, and more |
 | `category_members` | List articles filed under a category — taxonomy-based discovery, the reverse of `categories`; each entry has a 1–2 sentence extract + thumbnail |
 | `infobox` | Extract an article's structured fact box (infobox) as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact without reading prose |
+| `article_quality` | Wikipedia's quality assessments for an article — WikiProject grades (FA, GA, B, C, Start, Stub) + importance ratings; the encyclopedia's own trust signal before relying on an article |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
