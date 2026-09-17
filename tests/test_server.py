@@ -566,9 +566,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 28 tools listed", len(server.TOOLS) == 28)
+    check("all 29 tools listed", len(server.TOOLS) == 29)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "recent_changes", "category_members", "infobox"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "recent_changes", "category_members", "infobox", "article_quality"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -900,6 +900,27 @@ def main() -> int:
     check("dispatcher routes to infobox", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "— infobox" in out, out[:200])
 
+    section("article_quality")
+    out = server.article_quality("Albert Einstein")
+    check("returns header", 'Quality assessments for "Albert Einstein"' in out, out[:200])
+    check("overall class shown", "Overall class: **GA**" in out, out[:300])
+    check("project table present", "| WikiProject | Class | Importance |" in out, out[:600])
+    check("legend present", "FA/FL (featured)" in out, out[:500])
+    check("wikipedia link included", "en.wikipedia.org/wiki/Albert_Einstein" in out, out)
+
+    section("article_quality — missing article")
+    out = server.article_quality("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:200])
+
+    section("article_quality — assessment not enabled on this wiki")
+    out = server.article_quality("Albert Einstein", lang="de")
+    check("de.wiki returns guidance", "No quality assessments recorded" in out, out[:200])
+
+    section("article_quality — dispatcher routing")
+    out = server._call_tool("article_quality", {"title": "Paris"})
+    check("dispatcher routes to article_quality", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Quality assessments for" in out, out[:200])
+
     section("quote")
     out = server.quote()
     check("returns a quote", out.startswith("💬"), out[:200])
@@ -1142,6 +1163,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor", "limit": 3})
         elif name == "media_search":
             out = server._call_tool(name, {"query": "aurora borealis", "limit": 2})
+        elif name == "article_quality":
+            out = server._call_tool(name, {"title": "Paris"})
         else:
             out = server._call_tool(name, {})
         check(

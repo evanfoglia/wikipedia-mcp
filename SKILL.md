@@ -40,6 +40,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `recent_changes` | Most recent changes to Wikipedia articles (live feed) — filter by 'all', 'edit', 'new', 'categorize', or 'log' |
 | `category_members` | Articles filed under a category (reverse of `categories`) — taxonomy-based discovery, each entry with a 1–2 sentence extract + thumbnail |
 | `infobox` | An article's structured fact box as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact |
+| `article_quality` | Wikipedia's quality assessments (WikiProject grades FA/GA/B/C/Start/Stub + importance) — the trust signal to check before relying on an article |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
@@ -140,7 +141,7 @@ Uses Wikipedia's free public REST API — no API key required.
 
 ## Notes
 
-- User-Agent is `wikipedia-mcp/1.1.17` per Wikipedia API etiquette
+- User-Agent is `wikipedia-mcp/1.1.18` per Wikipedia API etiquette
 - All responses include links back to the source article
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
@@ -161,6 +162,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `media_list` returns every media item (images, videos, audio) the article uses — not just the lead thumbnail. Each entry has file title, type, caption, and thumbnail URL; lead media is marked with 🏆 so callers can skip it when they already have it via `image`. Uses Wikipedia's REST `/page/media-list` endpoint (structured JSON, no HTML parsing). Pairs with `image` (lead only) — use `image` for the headline thumbnail, `media_list` for the full inventory (gallery generation, fact-checking, slide decks, audits).
 - `media_search` is the topic-based counterpart to `image`/`media_list`: full-text search across Wikimedia Commons' File: namespace by keyword, so you can find freely-licensed media for a topic with no article yet (blog posts, slide decks, README hero images). Each result has file title, media type + dimensions, 320px thumbnail and full-size URLs, license short name, artist, description snippet, and a Commons file-page link. `filetype` filters to `image` (default: photos + diagrams/SVGs), `video`, `audio`, or `all`; limit clamps to 50. Uses the read-only Commons action API (generator=search) — GET-only, no new dependencies. Language-independent, so no `lang` parameter.
 - `infobox` returns the article's structured fact box as a markdown field/value table — the fastest path to a concrete fact ("who founded X?", "population of Y?") without reading prose. Parses raw wikitext from the read-only parse API locally (balanced-brace template extraction, no new dependencies): wikilinks flatten to plain text, citations/HTML are stripped, nested templates collapse to their values, birth/death-date templates render as `YYYY-M-D`. Fields capped at 50, values at 400 chars. Reports clearly when an article has no infobox. Pairs with `summary` (prose gist) and `article_extract` (full text) — use `infobox` for facts, the others for narrative.
+- `article_quality` returns Wikipedia's quality assessments for an article — the WikiProject grades (FA/FL featured, A, GA good, B, C, Start, Stub) plus importance ratings, with an overall class (best grade assigned) and per-project table. The encyclopedia's own trust signal: check it before relying on an article (GA/FA passed formal review; a Stub is a skeleton). Read-only pageassessments action API, no new dependencies. Note: assessment is only enabled on some language editions (en works; e.g. de reports no data).
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub
