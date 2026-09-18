@@ -19,6 +19,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `article_sections` | Get the table of contents (section headings) for an article — useful for navigating long articles before reading the full body |
 | `on_this_day` | Get historical events that happened on today's date |
 | `deaths_on_this_day` | Get notable deaths that happened on today's date (companion to `on_this_day`) |
+| `births_on_this_day` | Get notable births that happened on today's date (companion to `on_this_day` / `deaths_on_this_day`) |
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
 | `backlinks` | List incoming Wikipedia links to an article (what links here / referrer pages — inverse of `links`) |
@@ -101,6 +102,10 @@ mcporter call wikipedia on_this_day --args '{"count": 8}'
 # Deaths on this day (notable deaths for today — in memoriam content hooks)
 mcporter call wikipedia deaths_on_this_day
 mcporter call wikipedia deaths_on_this_day --args '{"count": 6}'
+
+# Births on this day (notable births for today — "born on this day" content hooks)
+mcporter call wikipedia births_on_this_day
+mcporter call wikipedia births_on_this_day --args '{"count": 6}'
 
 # Categories for an article (taxonomy-based discovery)
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus"}'
