@@ -23,6 +23,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `article_sections` | Table of contents (section headings) for an article — navigate before reading the full body |
 | `on_this_day` | Historical events that happened on today's date |
 | `deaths_on_this_day` | Notable deaths that happened on today's date — companion to `on_this_day` (events) |
+| `births_on_this_day` | Notable births that happened on today's date — companion to `on_this_day` (events) and `deaths_on_this_day` (deaths) |
 | `categories` | List Wikipedia categories an article belongs to |
 | `links` | List outgoing Wikipedia links from an article (graph-style discovery) |
 | `backlinks` | List incoming Wikipedia links to an article — what links here (inverse of `links`) |
@@ -102,6 +103,8 @@ mcporter call wikipedia on_this_day
 mcporter call wikipedia on_this_day --args '{"count": 8}'
 mcporter call wikipedia deaths_on_this_day
 mcporter call wikipedia deaths_on_this_day --args '{"count": 6}'
+mcporter call wikipedia births_on_this_day
+mcporter call wikipedia births_on_this_day --args '{"count": 6}'
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia categories --args '{"title": "Tyrannosaurus", "limit": 10}'
 mcporter call wikipedia links --args '{"title": "Tyrannosaurus"}'
@@ -150,6 +153,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `article_sections` returns the article's table of contents — section number, heading text, and nesting level — so callers can navigate long articles (50KB+ body) by picking the section they want before committing to `article_extract`. Pairs with `summary` (lead), `article_sections` (structure), `article_extract` (full body).
 - `on_this_day` returns historical events for today's UTC date from Wikipedia's "On This Day" feed — pairs with featured_article for daily "today in history" content hooks
 - `deaths_on_this_day` returns notable deaths for today's UTC date — the deaths-only companion to `on_this_day`. Pairs with `on_this_day` (events) and `featured_article` (today's long-form) for a full "today in Wikipedia" daily digest. Useful for "in memoriam" content hooks and obituary-style social posts.
+- `births_on_this_day` returns notable births for today's UTC date — the births companion to `on_this_day` (events) and `deaths_on_this_day` (deaths), completing the "today in Wikipedia" trio. Useful for "born on this day" content hooks and birthday round-ups.
 - `categories` returns Wikipedia categories for an article (hidden/maintenance categories filtered) — useful for taxonomy-based discovery beyond text search
 - `links` returns the article's outgoing Wikipedia links (main namespace only) — graph-style discovery showing which genera, people, and concepts an article references
 - `backlinks` returns the article's incoming Wikipedia links (what links here) — the inverse of `links`. Shows which other articles reference this one (cultural mentions, scientific citations, comparative anatomy pages, etc.). Same main-namespace filtering.
