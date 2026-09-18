@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.18"
+SERVER_VERSION = "1.1.19"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -642,6 +642,51 @@ def deaths_on_this_day(lang: str = "en", count: int = 5) -> str:
 
     sample = random.sample(deaths, min(count, len(deaths)))
     out = "**Deaths on this day:**\n\n"
+    for entry in sample:
+        year = entry.get("year", "?")
+        text = _strip_html(entry.get("text", ""))
+        out += f"- **{year}** — {text}\n"
+        pages = entry.get("pages", [])
+        if pages:
+            page_title = pages[0].get("title", "")
+            if page_title:
+                out += (
+                    f"  [Read on Wikipedia]"
+                    f"(https://{lang}.wikipedia.org/wiki/{page_title})\n"
+                )
+    return out
+
+
+def births_on_this_day(lang: str = "en", count: int = 5) -> str:
+    """Get notable births that happened on today's date from Wikipedia.
+
+    Returns a random sample of births from Wikipedia's "On This Day" feed
+    for the current UTC date — the companion to `on_this_day` (events)
+    and `deaths_on_this_day` (deaths). Wikipedia exposes these as separate
+    endpoints, so this tool queries `/feed/onthisday/births/{MM/DD}`
+    directly to get the births subset.
+
+    Useful for "born on this day" content hooks, birthday round-ups,
+    newsletter intros, and any place where the "who was born today in
+    history" framing fits. Pairs naturally with `on_this_day` (events)
+    and `featured_article` (today's long-form pick) for a full "today
+    in Wikipedia" daily digest.
+    """
+    try:
+        count = max(1, min(int(count), 10))
+    except (TypeError, ValueError):
+        count = 5
+    today_mm_dd = datetime.now(timezone.utc).strftime("%m/%d")
+    resp = _get(f"{_base(lang)}/feed/onthisday/births/{today_mm_dd}")
+    if resp.status_code == 404:
+        return f"No 'births on this day' available for {lang}.wikipedia.org today."
+    resp.raise_for_status()
+    births = resp.json().get("births", [])
+    if not births:
+        return f"No notable births found for today on {lang}.wikipedia.org."
+
+    sample = random.sample(births, min(count, len(births)))
+    out = "**Births on this day:**\n\n"
     for entry in sample:
         year = entry.get("year", "?")
         text = _strip_html(entry.get("text", ""))
@@ -2298,6 +2343,34 @@ TOOLS = [
         },
     },
     {
+        "name": "births_on_this_day",
+        "description": (
+            "Get notable births that happened on today's date (UTC) from "
+            "Wikipedia's 'On This Day' feed — the births companion to "
+            "`on_this_day` (events) and `deaths_on_this_day` (deaths). "
+            "Useful for 'born on this day' content hooks, birthday "
+            "round-ups, and newsletter intros. Pairs with `on_this_day` "
+            "(events) and `featured_article` (today's long-form pick) for "
+            "a full daily 'today in Wikipedia' digest."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of births to return (default 5, max 10)",
+                    "default": 5,
+                },
+            },
+        },
+    },
+    {
         "name": "categories",
         "description": (
             "List Wikipedia categories an article belongs to. Useful for "
@@ -2914,6 +2987,8 @@ def _call_tool(name: str, args: dict) -> str:
         return on_this_day(**args)
     if name == "deaths_on_this_day":
         return deaths_on_this_day(**args)
+    if name == "births_on_this_day":
+        return births_on_this_day(**args)
     if name == "categories":
         return categories(**args)
     if name == "links":
