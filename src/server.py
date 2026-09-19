@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.19"
+SERVER_VERSION = "1.1.20"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -572,6 +572,141 @@ def picture_of_the_day(date: str = "", lang: str = "en") -> str:
         links.append(f"[View on Wikimedia Commons]({file_page})")
     if links:
         out += "\n" + " · ".join(links)
+    return out
+
+
+def media_of_the_day(date: str = "") -> str:
+    """Get Wikimedia Commons' Media of the Day.
+
+    Commons curates one freely-licensed video or audio file per day
+    ("Media of the Day") — the motion-and-sound counterpart to
+    `picture_of_the_day`'s daily image. It's a different daily pick
+    (often a short video or field recording), so together they cover
+    the full daily media digest: `picture_of_the_day` (still image),
+    `featured_article` (long-form), `on_this_day` (history), `news`
+    (current events), `did_you_know` (facts).
+
+    `date` is an optional YYYYMMDD string (default: today UTC) so past
+    media can be browsed — e.g. media_of_the_day(date="20250615").
+    Some dates have no Media of the Day; those return a clear message.
+
+    Implementation: reads the day's `Template:Motd/YYYY-MM-DD` on
+    Commons for the selected file, then fetches its metadata (direct
+    URL, duration, mime type, thumbnail, artist, license, description)
+    via the read-only Commons action API — no new dependencies, same
+    descriptive User-Agent.
+
+    Returns markdown: media kind + duration, embedded preview thumbnail
+    (video files) or a listen link (audio), file name, artist, license,
+    description, plus links to the direct file and the Commons file page.
+    """
+    if date == "":
+        dt = datetime.now(timezone.utc)
+    else:
+        try:
+            dt = datetime.strptime(date, "%Y%m%d")
+        except ValueError:
+            return f"Error: date must be in YYYYMMDD format (got '{date}')"
+
+    date_dash = dt.strftime("%Y-%m-%d")
+    # The day's pick lives in a date-stamped template on Commons.
+    resp = _get(_COMMONS_API, params={
+        "action": "query",
+        "titles": f"Template:Motd/{date_dash}",
+        "prop": "revisions",
+        "rvprop": "content",
+        "rvslots": "main",
+        "format": "json",
+        "formatversion": "2",
+    })
+    resp.raise_for_status()
+    pages = (resp.json().get("query") or {}).get("pages", [])
+    page = pages[0] if pages else {}
+    if page.get("missing"):
+        return f"No media of the day found for {date_dash}."
+    revs = page.get("revisions") or []
+    content = ""
+    if revs:
+        content = ((revs[0].get("slots") or {}).get("main") or {}).get("content", "")
+    m = re.search(r"\{\{\s*Motd filename\s*\|\s*1\s*=\s*([^|}]+)", content)
+    if not m:
+        return f"No media of the day found for {date_dash}."
+    filename = m.group(1).strip()
+    # A few MOTD templates redundantly include the namespace prefix.
+    if filename.lower().startswith("file:"):
+        filename = filename[5:].strip()
+    file_title = f"File:{filename}"
+
+    resp = _get(_COMMONS_API, params={
+        "action": "query",
+        "titles": file_title,
+        "prop": "imageinfo",
+        "iiprop": "url|size|mime|extmetadata",
+        "iiurlwidth": 640,
+        "iiextmetadatafilter": "ImageDescription|Artist|LicenseShortName",
+        "format": "json",
+        "formatversion": "2",
+    })
+    resp.raise_for_status()
+    pages = (resp.json().get("query") or {}).get("pages", [])
+    info = ((pages[0].get("imageinfo") if pages else None) or [{}])[0]
+    if not info or not info.get("url"):
+        return (
+            f"Could not load the media of the day for {date_dash} "
+            f"({file_title})."
+        )
+
+    mime = info.get("mime", "")
+    kind = _media_kind(mime, file_title)
+    icon = {"video": "🎬", "audio": "🎵", "image": "🖼️"}.get(kind, "📎")
+    width = info.get("width")
+    height = info.get("height")
+    dims = f"{width}×{height}" if width and height else ""
+    duration = info.get("duration")
+    dur_str = ""
+    if duration:
+        total = int(float(duration))
+        hours, rem = divmod(total, 3600)
+        mins, secs = divmod(rem, 60)
+        dur_str = f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}"
+
+    meta = info.get("extmetadata") or {}
+    desc = _strip_html(
+        (meta.get("ImageDescription") or {}).get("value", "") or ""
+    ).strip()
+    artist = _strip_html(
+        (meta.get("Artist") or {}).get("value", "") or ""
+    ).strip()
+    license_name = (meta.get("LicenseShortName") or {}).get("value", "")
+    # imageinfo URLs carry ?utm_source=... tracking params; strip them.
+    thumb = (info.get("thumburl") or "").split("?")[0]
+    full = (info.get("url") or "").split("?")[0]
+    file_page = (
+        "https://commons.wikimedia.org/wiki/" + file_title.replace(" ", "_")
+    )
+
+    out = f"{icon} **Media of the Day — {dt.strftime('%B %d, %Y')}**\n\n"
+    if thumb:
+        out += f"![{desc[:80] if desc else filename}]({thumb})\n\n"
+    out += f"**File:** {file_title}\n"
+    out += f"**Type:** {kind}"
+    if dur_str:
+        out += f" ({dur_str})"
+    out += "\n"
+    if dims:
+        out += f"**Dimensions:** {dims}\n"
+    if artist:
+        out += f"**Artist:** {artist}\n"
+    if license_name:
+        out += f"**License:** {license_name}\n"
+    if desc:
+        out += f"\n{desc}\n"
+    verb = {"video": "Watch", "audio": "Listen"}.get(kind, "View")
+    links = []
+    if full:
+        links.append(f"[{verb}]({full})")
+    links.append(f"[View on Wikimedia Commons]({file_page})")
+    out += "\n" + " · ".join(links)
     return out
 
 
@@ -2290,6 +2425,28 @@ TOOLS = [
         },
     },
     {
+        "name": "media_of_the_day",
+        "description": (
+            "Get Wikimedia Commons' Media of the Day — the curated daily "
+            "video/audio clip from Commons' Media of the Day selection. "
+            "Returns media kind, duration, a preview thumbnail (video) or "
+            "listen link (audio), artist, license, and description. "
+            "Accepts an optional YYYYMMDD date (default today UTC) to "
+            "browse past picks — the motion-and-sound counterpart to "
+            "picture_of_the_day for daily content hooks."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYYMMDD format (default: today UTC)",
+                    "default": "",
+                },
+            },
+        },
+    },
+    {
         "name": "on_this_day",
         "description": (
             "Get historical events that happened on today's date (UTC) "
@@ -2979,6 +3136,8 @@ def _call_tool(name: str, args: dict) -> str:
         return featured_article(**args)
     if name == "picture_of_the_day":
         return picture_of_the_day(**args)
+    if name == "media_of_the_day":
+        return media_of_the_day(**args)
     if name == "article_extract":
         return article_extract(**args)
     if name == "article_sections":
