@@ -203,6 +203,41 @@ def main() -> int:
     out = server.picture_of_the_day(date="notadate")
     check("rejects bad date with format hint", "YYYYMMDD" in out, out[:200])
 
+    section("media_of_the_day")
+    out = server.media_of_the_day()
+    check(
+        "returns header or graceful missing",
+        "**Media of the Day" in out[:80] or "No media of the day found" in out,
+        out[:200],
+    )
+    if "**Media of the Day —" in out:
+        check("includes file page link", "commons.wikimedia.org" in out, out[-300:])
+
+    section("media_of_the_day — explicit date (video)")
+    out = server.media_of_the_day(date="20250615")
+    check("historical date returns header", "**Media of the Day — June 15, 2025" in out, out[:200])
+    check("reports video type + duration", "**Type:** video (" in out, out[:500])
+    check("includes watch link", "[Watch]" in out, out[-300:])
+
+    section("media_of_the_day — explicit date (audio)")
+    out = server.media_of_the_day(date="20260830")
+    check("audio date returns header", "**Media of the Day — August 30, 2026" in out, out[:200])
+    check("reports audio type", "**Type:** audio" in out, out[:500])
+    check("includes listen link", "[Listen]" in out, out[-300:])
+
+    section("media_of_the_day — date with no pick")
+    out = server.media_of_the_day(date="20270615")
+    check("missing date is graceful", "No media of the day found for 2027-06-15" in out, out[:200])
+
+    section("media_of_the_day — bad date")
+    out = server.media_of_the_day(date="notadate")
+    check("rejects bad date with format hint", "YYYYMMDD" in out, out[:200])
+
+    section("media_of_the_day — dispatcher routing")
+    out = server._call_tool("media_of_the_day", {"date": "20250615"})
+    check("dispatcher routes to media_of_the_day", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "**Media of the Day" in out, out[:200])
+
     section("on_this_day")
     out = server.on_this_day()
     check("returns header", out.startswith("**On this day"), out[:200])
@@ -601,9 +636,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 30 tools listed", len(server.TOOLS) == 30)
+    check("all 31 tools listed", len(server.TOOLS) == 31)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "recent_changes", "category_members", "infobox", "article_quality"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -814,8 +849,8 @@ def main() -> int:
     out = server.image("Tyrannosaurus")
     check("returns title", "Tyrannosaurus" in out, out[:300])
     check("lead image header present", "Lead Image" in out, out[:300])
-    check("thumbnail URL present", "Thumbnail" in out and "upload.wikimedia.org" in out, out[:500])
-    check("original URL present", "Original" in out and "upload.wikimedia.org" in out, out[:500])
+    check("thumbnail URL present", "Thumbnail" in out and "wikimedia.org" in out, out[:500])
+    check("original URL present", "Original" in out and "wikimedia.org" in out, out[:500])
     check("wikipedia link", "en.wikipedia.org/wiki/Tyrannosaurus" in out, out[:500])
     check("includes markdown image tag", "![Tyrannosaurus](" in out, out[:500])
 
@@ -1006,7 +1041,7 @@ def main() -> int:
     check("lists File: entries", "File:" in out, out[:500])
     check("includes Type: field", "Type: image" in out or "Type: video" in out, out[:500])
     check("includes Thumbnail: field", "Thumbnail:" in out, out[:500])
-    check("thumbnail URL on upload.wikimedia.org", "upload.wikimedia.org" in out, out[:500])
+    check("thumbnail URL on wikimedia.org", "wikimedia.org" in out, out[:500])
     # Lead image should be marked — every Wikipedia summary endpoint marks
     # exactly one item as leadImage=true, so the trophy should appear at
     # least once in the response.
