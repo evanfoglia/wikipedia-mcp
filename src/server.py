@@ -19,7 +19,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.20"
+SERVER_VERSION = "1.1.21"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -2204,6 +2204,65 @@ def article_quality(title: str, lang: str = "en") -> str:
     return out
 
 
+def related_articles(title: str, limit: int = 5, lang: str = "en") -> str:
+    """Find Wikipedia articles semantically similar to a given article.
+
+    Returns the articles Wikipedia's own search engine judges most similar
+    to the given title, using MoreLikeThis scoring over article text and
+    link structure — a discovery tool for "what should I read next".
+    Unlike `links` (raw outgoing links on the page) or `categories`
+    (shared topic buckets), this is a similarity ranking: given
+    "Velociraptor", expect dromaeosaurids, feathered dinosaurs, and
+    "Deinonychus" rather than every linked term. Each result shows the
+    article's short description and a thumbnail. The source article
+    itself is excluded from the results.
+    """
+    try:
+        limit = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        limit = 5
+    params = {
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": f"morelike:{title}",
+        "gsrlimit": limit + 1,  # +1 so dropping the source article keeps `limit`
+        "gsrnamespace": 0,
+        "prop": "pageimages|description",
+        "pithumbsize": 200,
+        "format": "json",
+        "formatversion": "2",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", [])
+
+    def _norm(t: str) -> str:
+        return t.replace("_", " ").strip().lower()
+
+    results = [p for p in pages if _norm(p.get("title", "")) != _norm(title)][:limit]
+    if not results:
+        return f"No related articles found for '{title}'."
+
+    out = f'**Articles related to "{title}":**\n\n'
+    for i, p in enumerate(results, 1):
+        name = p.get("title", "").strip()
+        desc = (p.get("description") or "").strip()
+        line = f"{i}. **{name}**"
+        if desc:
+            line += f" — {desc}"
+        out += line + "\n"
+        thumb = (p.get("thumbnail") or {}).get("source")
+        if thumb:
+            out += f"   ![thumbnail]({thumb})\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(title)})"
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -3118,6 +3177,41 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "related_articles",
+        "description": (
+            "Find Wikipedia articles semantically similar to a given article — "
+            "'what should I read next'. Uses Wikipedia's own search engine "
+            "(MoreLikeThis scoring over article text and link structure), "
+            "unlike `links` (raw outgoing links) or `categories` (shared "
+            "topic buckets): given 'Velociraptor', expect dromaeosaurids, "
+            "feathered dinosaurs, and 'Deinonychus'. Each result shows the "
+            "article's short description and thumbnail; the source article "
+            "itself is excluded. Read-only via the action API search "
+            "generator — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Velociraptor' or 'Albert Einstein')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max related articles to return (default 5, max 20)",
+                    "default": 5,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -3184,6 +3278,8 @@ def _call_tool(name: str, args: dict) -> str:
         return infobox(**args)
     if name == "article_quality":
         return article_quality(**args)
+    if name == "related_articles":
+        return related_articles(**args)
     return f"Unknown tool: {name}"
 
 
