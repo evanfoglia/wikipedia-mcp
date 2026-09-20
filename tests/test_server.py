@@ -636,9 +636,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 31 tools listed", len(server.TOOLS) == 31)
+    check("all 32 tools listed", len(server.TOOLS) == 32)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -991,6 +991,30 @@ def main() -> int:
     check("dispatcher routes to article_quality", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Quality assessments for" in out, out[:200])
 
+    section("related_articles")
+    out = server.related_articles("Albert Einstein")
+    check("returns header", 'Articles related to "Albert Einstein"' in out, out[:200])
+    check("numbered list present", "1. **" in out, out[:600])
+    check("source article excluded", "1. **Albert Einstein**" not in out, out[:600])
+    check("wikipedia link included", "en.wikipedia.org/wiki/Albert_Einstein" in out, out)
+
+    section("related_articles — limit respected")
+    out = server.related_articles("Velociraptor", limit=3)
+    check("exactly 3 results", out.count("**") // 2 >= 3 and "4. **" not in out, out[:800])
+
+    section("related_articles — missing article")
+    out = server.related_articles("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "No related articles found" in out, out[:200])
+
+    section("related_articles — multi-language")
+    out = server.related_articles("Albert Einstein", lang="de", limit=2)
+    check("german related works", "de.wikipedia.org/wiki/" in out, out[:400])
+
+    section("related_articles — dispatcher routing")
+    out = server._call_tool("related_articles", {"title": "Paris"})
+    check("dispatcher routes to related_articles", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", 'Articles related to "Paris"' in out, out[:200])
+
     section("quote")
     out = server.quote()
     check("returns a quote", out.startswith("💬"), out[:200])
@@ -1235,6 +1259,8 @@ def main() -> int:
             out = server._call_tool(name, {"query": "aurora borealis", "limit": 2})
         elif name == "article_quality":
             out = server._call_tool(name, {"title": "Paris"})
+        elif name == "related_articles":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         else:
             out = server._call_tool(name, {})
         check(
