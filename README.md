@@ -39,6 +39,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `category_members` | List articles filed under a category — taxonomy-based discovery, the reverse of `categories`; each entry has a 1–2 sentence extract + thumbnail |
 | `infobox` | Extract an article's structured fact box (infobox) as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact without reading prose |
 | `article_quality` | Wikipedia's quality assessments for an article — WikiProject grades (FA, GA, B, C, Start, Stub) + importance ratings; the encyclopedia's own trust signal before relying on an article |
+| `related_articles` | Find articles semantically similar to a given article ("what should I read next") — Wikipedia's own MoreLikeThis search ranking, each with short description + thumbnail |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
@@ -153,6 +154,10 @@ mcporter call wikipedia media_list --args '{"title": "Berlin", "lang": "de"}'
 mcporter call wikipedia media_search --args '{"query": "aurora borealis"}'
 mcporter call wikipedia media_search --args '{"query": "volcano eruption", "filetype": "video", "limit": 5}'
 
+# Related articles — semantically similar articles ("what should I read next")
+mcporter call wikipedia related_articles --args '{"title": "Velociraptor"}'
+mcporter call wikipedia related_articles --args '{"title": "Velociraptor", "limit": 10}'
+
 # Random notable quote (curated list of famous authors)
 mcporter call wikipedia quote
 mcporter call wikipedia quote --args '{"lang": "de"}'  # lang accepted, currently English-only
@@ -172,6 +177,7 @@ Uses Wikipedia's free REST API:
 - Search: MediaWiki Action API (`/w/api.php`)
 - Summary / Random / Featured / Media-list: REST API v1 (`/api/rest_v1/...`)
 - Pageviews / Top reads: Wikimedia cross-wiki metrics API (`https://wikimedia.org/api/rest_v1/metrics/pageviews/...`)
+- Related articles: MediaWiki Action API (search generator with `morelike:` scoring)
 
 No API key required. Respects Wikipedia's User-Agent policy.
 
