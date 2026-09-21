@@ -636,9 +636,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 32 tools listed", len(server.TOOLS) == 32)
+    check("all 33 tools listed", len(server.TOOLS) == 33)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1015,6 +1015,40 @@ def main() -> int:
     check("dispatcher routes to related_articles", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", 'Articles related to "Paris"' in out, out[:200])
 
+    section("contributors")
+    out = server.contributors("Albert Einstein")
+    check("returns header", 'Top contributors to "Albert Einstein"' in out, out[:200])
+    check("numbered list present", "1. **" in out, out[:600])
+    check("edit counts shown", "edits (" in out, out[:600])
+    check("user page link included", "en.wikipedia.org/wiki/User:" in out, out[:600])
+    check("sample span noted", "most recent edits sampled" in out, out[:200])
+
+    section("contributors — limit respected")
+    out = server.contributors("Velociraptor", limit=3)
+    check("exactly 3 contributors", "3. **" in out and "4. **" not in out, out[:800])
+
+    section("contributors — limit clamping + type safety")
+    out = server.contributors("Velociraptor", limit=100)
+    numbered = sum(1 for i in range(1, 21) if f"\n{i}. " in out)
+    check("limit=100 clamps to ≤20", numbered <= 20, f"got {numbered} items")
+    out = server.contributors("Velociraptor", limit=-5)
+    check("limit=-5 clamps to 1", "\n1. " in out and "\n2. " not in out, out[:400])
+    out = server.contributors("Velociraptor", limit="abc")
+    check("non-int limit returns results (no crash)", "Top contributors to" in out, out[:200])
+
+    section("contributors — redirect follows")
+    out = server.contributors("Einstein")  # redirects to Albert Einstein
+    check("redirect resolves", 'Top contributors to "Albert Einstein"' in out, out[:200])
+
+    section("contributors — missing article")
+    out = server.contributors("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:200])
+
+    section("contributors — dispatcher routing")
+    out = server._call_tool("contributors", {"title": "Paris"})
+    check("dispatcher routes to contributors", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", 'Top contributors to "Paris"' in out, out[:200])
+
     section("quote")
     out = server.quote()
     check("returns a quote", out.startswith("💬"), out[:200])
@@ -1260,6 +1294,8 @@ def main() -> int:
         elif name == "article_quality":
             out = server._call_tool(name, {"title": "Paris"})
         elif name == "related_articles":
+            out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "contributors":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
             out = server._call_tool(name, {})
