@@ -154,7 +154,7 @@ Uses Wikipedia's free public REST API — no API key required.
 
 ## Notes
 
-- User-Agent is `wikipedia-mcp/1.1.21` per Wikipedia API etiquette
+- User-Agent is `wikipedia-mcp/1.1.22` per Wikipedia API etiquette
 - All responses include links back to the source article
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
