@@ -20,7 +20,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.21"
+SERVER_VERSION = "1.1.22"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
