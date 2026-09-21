@@ -44,6 +44,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `infobox` | An article's structured fact box as a field/value table — dates, people, places, statistics; the fastest path to a concrete fact |
 | `article_quality` | Wikipedia's quality assessments (WikiProject grades FA/GA/B/C/Start/Stub + importance) — the trust signal to check before relying on an article |
 | `related_articles` | Articles semantically similar to a given article ("what should I read next") — Wikipedia's own MoreLikeThis ranking, each with short description + thumbnail |
+| `contributors` | Who writes and maintains an article — most active recent editors ranked by edit count, with user-page links + anonymous (IP) edit share; the provenance companion to `article_quality` |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
@@ -134,6 +135,7 @@ mcporter call wikipedia media_search --args '{"query": "aurora borealis"}'
 mcporter call wikipedia media_search --args '{"query": "volcano eruption", "filetype": "video", "limit": 5}'
 mcporter call wikipedia related_articles --args '{"title": "Velociraptor"}'
 mcporter call wikipedia related_articles --args '{"title": "Velociraptor", "limit": 10}'
+mcporter call wikipedia contributors --args '{"title": "Albert Einstein"}'
 mcporter call wikipedia quote
 mcporter call wikipedia infobox --args '{"title": "Albert Einstein"}'
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
@@ -177,6 +179,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `infobox` returns the article's structured fact box as a markdown field/value table — the fastest path to a concrete fact ("who founded X?", "population of Y?") without reading prose. Parses raw wikitext from the read-only parse API locally (balanced-brace template extraction, no new dependencies): wikilinks flatten to plain text, citations/HTML are stripped, nested templates collapse to their values, birth/death-date templates render as `YYYY-M-D`. Fields capped at 50, values at 400 chars. Reports clearly when an article has no infobox. Pairs with `summary` (prose gist) and `article_extract` (full text) — use `infobox` for facts, the others for narrative.
 - `article_quality` returns Wikipedia's quality assessments for an article — the WikiProject grades (FA/FL featured, A, GA good, B, C, Start, Stub) plus importance ratings, with an overall class (best grade assigned) and per-project table. The encyclopedia's own trust signal: check it before relying on an article (GA/FA passed formal review; a Stub is a skeleton). Read-only pageassessments action API, no new dependencies. Note: assessment is only enabled on some language editions (en works; e.g. de reports no data).
 - `related_articles` returns articles Wikipedia's own search engine judges most similar to a given title (MoreLikeThis scoring over article text and link structure) — the "what should I read next" discovery tool. Unlike `links` (raw outgoing links on the page) or `categories` (shared topic buckets), this is a similarity ranking: given "Velociraptor", expect dromaeosaurids, feathered dinosaurs, and "Deinonychus". Each entry shows the short description and a thumbnail; the source article itself is excluded. Read-only action API search generator, no new dependencies.
+- `contributors` answers "who writes this article" — the most active recent editors. It tallies up to 500 recent revisions (read-only action API, GET only, no new dependencies) into a ranked table: top named editors by edit count with their share of sampled edits and user-page links, plus the anonymous (IP) edit share, and the sampled date span. A provenance companion to `article_quality` (the grade earned) and `revisions` (the raw log): a page tended by veteran caretakers reads differently from one mostly touched by drive-by IP edits, and the top names are who to credit — or to check for conflicts of interest. Follows redirects; limit clamps to 20.
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub
