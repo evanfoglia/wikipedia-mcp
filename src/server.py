@@ -14,6 +14,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Optional
+from urllib.parse import quote as _url_quote
 
 import requests
 
@@ -2263,6 +2264,77 @@ def related_articles(title: str, limit: int = 5, lang: str = "en") -> str:
     return out
 
 
+def contributors(title: str, limit: int = 10, lang: str = "en") -> str:
+    """Who writes and maintains an article — most active recent editors.
+
+    Tallies the article's recent edit history (up to 500 revisions, read-only
+    action API) into a ranked contributor table: top named editors by edit
+    count, each with their share of the sampled edits and a link to their
+    user page, plus the anonymous (IP) edit share. A provenance companion to
+    `article_quality` (what grade the article earned) and `revisions` (the
+    raw edit log): an article tended by a handful of veteran caretakers
+    reads differently from one mostly touched by drive-by IP edits, and the
+    top names are the people to credit — or to check for conflicts of
+    interest. Follows redirects, so nicknames and old titles resolve.
+    """
+    try:
+        limit = max(1, min(int(limit), 20))
+    except (TypeError, ValueError):
+        limit = 10
+    params = {
+        "action": "query",
+        "prop": "revisions",
+        "titles": title,
+        "rvprop": "user|timestamp",
+        "rvlimit": 500,
+        "redirects": 1,
+        "format": "json",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", {})
+    if not pages:
+        return f"No revisions found for '{title}'."
+
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    revs = page.get("revisions", [])
+    if not revs:
+        return f"No revisions found for '{page.get('title', title)}'."
+
+    page_title = page.get("title", title)
+    named: dict = {}
+    anon = 0
+    for rev in revs:
+        if "anon" in rev:
+            anon += 1
+        else:
+            user = rev.get("user", "?")
+            named[user] = named.get(user, 0) + 1
+    total = len(revs)
+    newest = (revs[0].get("timestamp") or "?")[:10]
+    oldest = (revs[-1].get("timestamp") or "?")[:10]
+
+    out = (
+        f'**Top contributors to "{page_title}"** '
+        f"({total} most recent edits sampled, {oldest} – {newest}):\n\n"
+    )
+    ranked = sorted(named.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+    for i, (user, count) in enumerate(ranked, 1):
+        share = round(100 * count / total)
+        user_url = f"https://{lang}.wikipedia.org/wiki/User:{_url_quote(_slug(user), safe='')}"
+        out += f"{i}. **{user}** — {count} edits ({share}%) ([user page]({user_url}))\n"
+    if anon:
+        share = round(100 * anon / total)
+        out += f"\nAnonymous (IP) editors: {anon} edits ({share}%)\n"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -3212,6 +3284,43 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "contributors",
+        "description": (
+            "Who writes and maintains a Wikipedia article — the most active "
+            "recent editors. Tallies the article's recent edit history (up to "
+            "500 revisions) into a ranked contributor table: top named editors "
+            "by edit count with their share of sampled edits and user-page "
+            "links, plus the anonymous (IP) edit share. A provenance "
+            "companion to `article_quality` (the grade earned) and `revisions` "
+            "(the raw edit log): a page tended by veteran caretakers reads "
+            "differently from one mostly touched by drive-by IP edits, and "
+            "the top names are the people to credit or check for conflicts "
+            "of interest. Follows redirects. Read-only action API revisions "
+            "query — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Albert Einstein' or 'Paris')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max top contributors to return (default 10, max 20)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -3280,6 +3389,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_quality(**args)
     if name == "related_articles":
         return related_articles(**args)
+    if name == "contributors":
+        return contributors(**args)
     return f"Unknown tool: {name}"
 
 
