@@ -14,13 +14,13 @@ import sys
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Optional
-from urllib.parse import quote as _url_quote
+from urllib.parse import quote as _url_quote, unquote as _url_unquote
 
 import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.22"
+SERVER_VERSION = "1.1.23"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -2335,6 +2335,96 @@ def contributors(title: str, limit: int = 10, lang: str = "en") -> str:
     return out
 
 
+def references(title: str, limit: int = 20, lang: str = "en") -> str:
+    """Show the sources an article cites — its bibliography.
+
+    Returns the article's numbered reference list (what readers see under
+    "References" / "Sources" at the bottom of the page): each citation's
+    text plus the off-wiki URLs it points to (DOI, publisher, archive,
+    and other primary-source links). This is the verification companion
+    to `external_links`: `external_links` dumps EVERY off-wiki link on
+    the page (templates, navboxes, see-also sections), while `references`
+    returns only the sources the article actually cites — the bibliography
+    you'd hand to a fact-checker. Useful for source verification (does the
+    claim trace to a real paper?), citation audits, bibliography building,
+    and primary-source discovery. Pairs naturally with `article_quality`
+    (the trust signal) and `contributors` (who wrote it) for a full
+    "can I rely on this article?" audit.
+
+    Reads the rendered references list (`<ol class="references">`) from
+    the MediaWiki parse API — read-only GET, no new dependencies.
+    Follows redirects, so nicknames and old titles resolve. `limit`
+    clamps the number of citations returned (default 20, max 50);
+    well-sourced articles can cite hundreds of sources.
+    """
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    params = {
+        "action": "parse",
+        "page": title,
+        "prop": "text",
+        "redirects": 1,
+        "format": "json",
+        "formatversion": "2",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+
+    # MediaWiki parse API returns 200 OK with an `error` block for
+    # missing titles — handle it like a 404.
+    if "error" in data:
+        return f"Article '{title}' not found on Wikipedia."
+    parsed = data.get("parse", {})
+    page_title = parsed.get("title", title)
+    html_text = parsed.get("text", "")
+
+    items = []
+    for block in re.findall(r'<ol class="references">(.*?)</ol>', html_text, re.S):
+        items.extend(re.findall(r"<li[^>]*>(.*?)</li>", block, re.S))
+    if not items:
+        return (
+            f"No references found for '{page_title}' on {lang}.wikipedia.org. "
+            "Not every article cites sources — try `summary` or "
+            "`article_extract` for this topic instead."
+        )
+
+    out = f'**References cited by "{page_title}"** ({len(items)} total):\n\n'
+    for i, item in enumerate(items[:limit], 1):
+        urls = []
+        for href in re.findall(r'href="([^"]+)"', item):
+            href = href.strip()
+            if not href.startswith(("http://", "https://")):
+                continue
+            host = href.split("/", 3)[2].lower()
+            if host.endswith((".wikipedia.org", ".wikimedia.org")):
+                continue  # keep it to real off-wiki sources
+            url = _url_unquote(href)
+            if url not in urls:
+                urls.append(url)
+        text = re.sub(r"<[^>]+>", " ", item)
+        text = unescape(text)
+        text = re.sub(r"\s+", " ", text).strip()
+        # Strip the citation backlink markers ("^ a b c", or "↑" on some
+        # language editions) left behind after the anchor tags are removed.
+        text = re.sub(r"^[\^↑]\s*([a-z]\s+)*", "", text)
+        if len(text) > 420:
+            text = text[:417] + "..."
+        out += f"{i}. {text}\n"
+        for url in urls[:5]:
+            out += f"   - {url}\n"
+    out += (
+        f"\n[View article]"
+        f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -3321,6 +3411,41 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "references",
+        "description": (
+            "The sources an article cites — its bibliography. Returns the "
+            "article's numbered reference list: each citation's text plus "
+            "the off-wiki URLs it points to (DOI, publisher, archive, "
+            "primary-source links). The verification companion to "
+            "`external_links` (which dumps every off-wiki link on the page): "
+            "`references` returns only the sources the article actually "
+            "cites. Useful for source verification, citation audits, "
+            "bibliography building, and primary-source discovery. Follows "
+            "redirects. Read-only parse API — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Albert Einstein' or 'Paris')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max citations to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -3391,6 +3516,8 @@ def _call_tool(name: str, args: dict) -> str:
         return related_articles(**args)
     if name == "contributors":
         return contributors(**args)
+    if name == "references":
+        return references(**args)
     return f"Unknown tool: {name}"
 
 
