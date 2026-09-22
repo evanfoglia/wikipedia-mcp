@@ -636,9 +636,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 33 tools listed", len(server.TOOLS) == 33)
+    check("all 34 tools listed", len(server.TOOLS) == 34)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1049,6 +1049,51 @@ def main() -> int:
     check("dispatcher routes to contributors", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", 'Top contributors to "Paris"' in out, out[:200])
 
+
+    section("references")
+    out = server.references("Albert Einstein")
+    check("returns header", 'References cited by "Albert Einstein"' in out, out[:200])
+    check("total count shown", "total):" in out, out[:200])
+    check("numbered citations present", "\n1. " in out and "\n2. " in out, out[:1200])
+    check("citation URLs listed", "https://" in out, out[:1200])
+    check("doi link present", "doi.org" in out, out[:1200])
+    check("backlink markers stripped", "\n1. ^" not in out and "\n1. ↑" not in out, out[:400])
+    check("view article link", "en.wikipedia.org/wiki/Albert_Einstein" in out, out[-200:])
+
+    section("references — limit respected")
+    out = server.references("Albert Einstein", limit=3)
+    check("exactly 3 citations", "\n3. " in out and "\n4. " not in out, out[:3000])
+
+    section("references — limit clamping + type safety")
+    out = server.references("Albert Einstein", limit=100)
+    numbered = sum(1 for i in range(1, 51) if f"\n{i}. " in out)
+    check("limit=100 clamps to ≤50", numbered <= 50, f"got {numbered} items")
+    out = server.references("Albert Einstein", limit=-5)
+    check("limit=-5 clamps to 1", "\n1. " in out and "\n2. " not in out, out[:800])
+    out = server.references("Albert Einstein", limit="abc")
+    check("non-int limit returns results (no crash)", "References cited by" in out, out[:200])
+
+    section("references — redirect follows")
+    out = server.references("Einstein")  # redirects to Albert Einstein
+    check("redirect resolves", 'References cited by "Albert Einstein"' in out, out[:200])
+
+    section("references — missing article")
+    out = server.references("ThisArticleDoesNotExist12345")
+    check("missing article returns clear message", "not found" in out, out[:200])
+
+    section("references — article with no references")
+    out = server.references("Mercury")  # disambiguation page, no reference list
+    check("no-references message", "No references found" in out, out[:200])
+
+    section("references — german")
+    out = server.references("Albert Einstein", lang="de", limit=2)
+    check("german references work", "References cited by" in out and "de.wikipedia.org/wiki/" in out, out[:400])
+
+    section("references — dispatcher routing")
+    out = server._call_tool("references", {"title": "Paris"})
+    check("dispatcher routes to references", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", 'References cited by "Paris"' in out, out[:200])
+
     section("quote")
     out = server.quote()
     check("returns a quote", out.startswith("💬"), out[:200])
@@ -1297,6 +1342,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "contributors":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "references":
+            out = server._call_tool(name, {"title": "Velociraptor", "limit": 2})
         else:
             out = server._call_tool(name, {})
         check(
