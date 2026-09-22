@@ -41,6 +41,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `article_quality` | Wikipedia's quality assessments for an article — WikiProject grades (FA, GA, B, C, Start, Stub) + importance ratings; the encyclopedia's own trust signal before relying on an article |
 | `related_articles` | Find articles semantically similar to a given article ("what should I read next") — Wikipedia's own MoreLikeThis search ranking, each with short description + thumbnail |
 | `contributors` | Who writes and maintains an article — most active recent editors ranked by edit count (up to 500 sampled revisions), with user-page links + anonymous (IP) edit share; the provenance companion to `article_quality` |
+| `references` | The sources an article cites — its bibliography: each citation's text plus the off-wiki URLs it points to (DOI, publisher, archive, primary-source links); the verification companion to `external_links` |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
@@ -162,6 +163,10 @@ mcporter call wikipedia related_articles --args '{"title": "Velociraptor", "limi
 # Contributors — who writes and maintains an article
 mcporter call wikipedia contributors --args '{"title": "Albert Einstein"}'
 mcporter call wikipedia contributors --args '{"title": "Velociraptor", "limit": 5}'
+
+# References — the sources an article cites (its bibliography)
+mcporter call wikipedia references --args '{"title": "Albert Einstein"}'
+mcporter call wikipedia references --args '{"title": "Velociraptor", "limit": 10}'
 
 # Random notable quote (curated list of famous authors)
 mcporter call wikipedia quote
