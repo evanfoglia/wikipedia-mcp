@@ -45,6 +45,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `article_quality` | Wikipedia's quality assessments (WikiProject grades FA/GA/B/C/Start/Stub + importance) — the trust signal to check before relying on an article |
 | `related_articles` | Articles semantically similar to a given article ("what should I read next") — Wikipedia's own MoreLikeThis ranking, each with short description + thumbnail |
 | `contributors` | Who writes and maintains an article — most active recent editors ranked by edit count, with user-page links + anonymous (IP) edit share; the provenance companion to `article_quality` |
+| `references` | The sources an article cites — its bibliography: each citation's text plus the off-wiki URLs it points to (DOI, publisher, archive, primary-source links); the verification companion to `external_links` |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
@@ -136,6 +137,8 @@ mcporter call wikipedia media_search --args '{"query": "volcano eruption", "file
 mcporter call wikipedia related_articles --args '{"title": "Velociraptor"}'
 mcporter call wikipedia related_articles --args '{"title": "Velociraptor", "limit": 10}'
 mcporter call wikipedia contributors --args '{"title": "Albert Einstein"}'
+mcporter call wikipedia references --args '{"title": "Albert Einstein"}'
+mcporter call wikipedia references --args '{"title": "Velociraptor", "limit": 10}'
 mcporter call wikipedia quote
 mcporter call wikipedia infobox --args '{"title": "Albert Einstein"}'
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
@@ -148,13 +151,14 @@ Uses Wikipedia's free public REST API — no API key required.
 - Search: MediaWiki Action API
 - External links: MediaWiki Action API (`prop=extlinks`)
 - Infobox: MediaWiki Action API (`action=parse` + `prop=wikitext`), with local wikitext parsing (no new dependencies)
+- References: MediaWiki Action API (`action=parse` + `prop=text`), extracting the rendered `<ol class="references">` citation list (no new dependencies)
 - Summary / Random / Featured / Picture of the Day: REST API v1 (`/api/rest_v1/...`)
 - Media of the Day: MediaWiki Action API on Commons (date-stamped `Template:Motd/YYYY-MM-DD` + `imageinfo` metadata)
 - Related articles: MediaWiki Action API (search generator with `morelike:` scoring)
 
 ## Notes
 
-- User-Agent is `wikipedia-mcp/1.1.22` per Wikipedia API etiquette
+- User-Agent is `wikipedia-mcp/1.1.23` per Wikipedia API etiquette
 - All responses include links back to the source article
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
@@ -180,6 +184,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `article_quality` returns Wikipedia's quality assessments for an article — the WikiProject grades (FA/FL featured, A, GA good, B, C, Start, Stub) plus importance ratings, with an overall class (best grade assigned) and per-project table. The encyclopedia's own trust signal: check it before relying on an article (GA/FA passed formal review; a Stub is a skeleton). Read-only pageassessments action API, no new dependencies. Note: assessment is only enabled on some language editions (en works; e.g. de reports no data).
 - `related_articles` returns articles Wikipedia's own search engine judges most similar to a given title (MoreLikeThis scoring over article text and link structure) — the "what should I read next" discovery tool. Unlike `links` (raw outgoing links on the page) or `categories` (shared topic buckets), this is a similarity ranking: given "Velociraptor", expect dromaeosaurids, feathered dinosaurs, and "Deinonychus". Each entry shows the short description and a thumbnail; the source article itself is excluded. Read-only action API search generator, no new dependencies.
 - `contributors` answers "who writes this article" — the most active recent editors. It tallies up to 500 recent revisions (read-only action API, GET only, no new dependencies) into a ranked table: top named editors by edit count with their share of sampled edits and user-page links, plus the anonymous (IP) edit share, and the sampled date span. A provenance companion to `article_quality` (the grade earned) and `revisions` (the raw log): a page tended by veteran caretakers reads differently from one mostly touched by drive-by IP edits, and the top names are who to credit — or to check for conflicts of interest. Follows redirects; limit clamps to 20.
+- `references` answers "what does this article cite" — the article's bibliography. It reads the rendered reference list from the read-only parse API (GET only, no new dependencies): each citation's cleaned text plus the off-wiki URLs it points to (DOI, publisher, archive, primary-source links), with internal wikipedia.org/wikimedia.org links filtered out. Backlink markers (^ a b c / ↑) are stripped and long citations truncated at 420 chars. The verification companion to `external_links` (which dumps every off-wiki link on the page, including templates): `references` returns only the sources actually cited — the bibliography you'd hand to a fact-checker. Pairs with `article_quality` (trust signal) and `contributors` (who wrote it) for a full "can I rely on this article?" audit. Reports clearly when an article has no reference list. Follows redirects; limit clamps to 50.
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub
