@@ -7,6 +7,7 @@ Uses Wikipedia REST API — free, no API key required.
 Hand-rolled JSON-RPC stdio MCP for maximum portability (no SDK dependency).
 """
 
+import difflib
 import json
 import random
 import re
@@ -20,7 +21,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.23"
+SERVER_VERSION = "1.1.24"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -106,6 +107,39 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 def _strip_html(s: str) -> str:
     return _TAG_RE.sub("", s)
+
+
+_STYLE_SCRIPT_RE = re.compile(r"<(style|script)[^>]*>.*?</\1\s*>", re.S | re.I)
+_REF_SUP_RE = re.compile(r'<sup[^>]*\bclass="reference"[^>]*>.*?</sup\s*>', re.S | re.I)
+_BLOCK_CLOSE_RE = re.compile(
+    r"</(p|h[1-6]|li|dt|dd|tr|div|blockquote|figure|figcaption|table)[^>]*>"
+    r"|<\s*(br|hr)[^>]*>",
+    re.I,
+)
+
+
+def _html_to_text(html: str) -> str:
+    """Convert rendered MediaWiki HTML to readable plain text (stdlib only).
+
+    Drops <style>/<script> blocks (the parse API injects large inline CSS),
+    citation-marker superscripts, and edit-section links; preserves
+    paragraph/list structure as newlines; unescapes entities and collapses
+    whitespace.
+    """
+    text = _STYLE_SCRIPT_RE.sub(" ", html)
+    text = _REF_SUP_RE.sub(" ", text)
+    # Preserve paragraph structure before stripping the remaining tags.
+    text = _BLOCK_CLOSE_RE.sub("\n", text)
+    text = _TAG_RE.sub("", text)
+    text = unescape(text)
+    lines = [re.sub(r"[ \t\xa0]+", " ", ln).strip() for ln in text.split("\n")]
+    out_lines = []
+    for ln in lines:
+        if ln:
+            out_lines.append(ln)
+        elif out_lines and out_lines[-1] != "":
+            out_lines.append("")
+    return "\n".join(out_lines).strip("\n")
 
 
 def _slug(title: str) -> str:
@@ -493,6 +527,200 @@ def article_sections(title: str, lang: str = "en") -> str:
         f"(https://{lang}.wikipedia.org/wiki/{_slug(title_out)})"
     )
     return out
+
+
+def _fetch_sections(title: str, lang: str):
+    """Fetch the parse-API section list for a title.
+
+    Returns (page_title, sections). Raises ValueError with a user-facing
+    message when the article is missing or the fetch fails.
+    """
+    params = {
+        "action": "parse",
+        "page": title,
+        "prop": "sections",
+        "redirects": 1,
+        "format": "json",
+        "formatversion": "2",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        raise ValueError(f"Article '{title}' not found on Wikipedia.")
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        info = data.get("error", {}).get("info", "")
+        code = data.get("error", {}).get("code", "")
+        info_lc = info.lower()
+        if (
+            "missing" in info_lc
+            or "doesn't exist" in info_lc
+            or "does not exist" in info_lc
+            or "bad title" in info_lc
+            or code == "missingtitle"
+        ):
+            raise ValueError(f"Article '{title}' not found on Wikipedia.")
+        raise ValueError(f"Could not fetch sections for '{title}': {info}")
+    parse = data.get("parse") or {}
+    return (parse.get("title", title) or title, parse.get("sections") or [])
+
+
+def _resolve_section(sections, section):
+    """Resolve a section specifier to (flat_index, heading, anchor).
+
+    Accepts a section number exactly as shown by `article_sections`
+    (e.g. 2 or "2.1"), a heading name (case-insensitive), or 0 for the
+    lead/intro. Raises ValueError with a helpful message — including
+    close-match suggestions for misspelled names.
+    """
+    total = len(sections)
+    if isinstance(section, bool):
+        raise ValueError(
+            "Invalid section: pass a section number as shown by "
+            "`article_sections` (e.g. 2 or '2.1'), a heading name, or 0 "
+            "for the lead/intro."
+        )
+
+    def entry(i):
+        sec = sections[i]
+        heading = _strip_html(unescape(sec.get("line") or "")).strip()
+        heading = re.sub(r"\s+", " ", heading)
+        return (i + 1, heading or "Section %d" % (i + 1), sec.get("anchor") or "")
+
+    def range_error(key):
+        return ValueError(
+            "Section %s out of range: this article has %d numbered "
+            "section(s) (0 = lead/intro). Use `article_sections` to browse "
+            "them." % (key, total)
+        )
+
+    # Normalize the specifier to a section-number string ("2", "2.1"),
+    # a heading name, or the lead (0).
+    number_key = None
+    if isinstance(section, int):
+        if section == 0:
+            return (0, "Introduction", "")
+        if section < 0:
+            raise range_error(section)
+        number_key = str(section)
+    elif isinstance(section, str):
+        stripped = section.strip()
+        if re.fullmatch(r"-?\d+", stripped):
+            n = int(stripped)
+            if n == 0:
+                return (0, "Introduction", "")
+            if n < 0:
+                raise range_error(stripped)
+            number_key = str(n)
+        else:
+            number_key = stripped
+    else:
+        raise ValueError(
+            "Invalid section %r: pass a section number as shown by "
+            "`article_sections` (e.g. 2 or '2.1'), a heading name, or 0 "
+            "for the lead/intro." % (section,)
+        )
+
+    # Match against the hierarchical numbers printed by `article_sections`
+    # ("1", "1.1", "2", ...) — so 2 means the section displayed as "2.",
+    # not the 2nd row of the flat list.
+    for i, sec in enumerate(sections):
+        if (sec.get("number") or "").strip() == number_key:
+            return entry(i)
+    if re.fullmatch(r"\d+(\.\d+)*", number_key):
+        raise range_error(number_key)
+
+    # Heading name, case-insensitive.
+    want = re.sub(r"\s+", " ", number_key).casefold()
+    indexed = [
+        (j, re.sub(r"\s+", " ", entry(j)[1]).casefold())
+        for j in range(total)
+    ]
+    for j, name in indexed:
+        if name == want:
+            return entry(j)
+    close = difflib.get_close_matches(
+        want, [n for _, n in indexed], n=3, cutoff=0.6
+    )
+    hint = ""
+    if close:
+        shown = [entry(j)[1] for j, n in indexed if n in close][:3]
+        hint = " Did you mean: %s?" % ", ".join(shown)
+    raise ValueError(
+        "No section named '%s'.%s Use `article_sections` to list this "
+        "article's sections." % (section, hint)
+    )
+
+
+def section_text(title: str, section, lang: str = "en") -> str:
+    """Read one section of a Wikipedia article as plain text.
+
+    The targeted-reading companion to `article_sections`: that tool lists
+    the table of contents, this one reads the section you picked — without
+    pulling the whole 50KB+ article body via `article_extract`. Pass a section number exactly as shown by `article_sections`
+    (e.g. 2 or "2.1"; 0 reads the lead/intro before the first heading),
+    "2.1", or a heading name (case-insensitive, e.g. "Life and career");
+    misspelled names get close-match suggestions.
+
+    Renders the section through the MediaWiki parse API (read-only GET)
+    and converts it to plain text: inline CSS/JS, citation markers, and
+    edit-section links are stripped while paragraph structure is kept.
+    Follows redirects. The link at the bottom deep-links to the section
+    on the article page. Pairs with `article_sections` (browse),
+    `summary` (lead gist), and `article_extract` (full body).
+    """
+    try:
+        page_title, sections = _fetch_sections(title, lang)
+    except ValueError as e:
+        return str(e)
+    if not sections and section not in (0, "0"):
+        return (
+            f'**Sections in "{page_title}":**\n\n'
+            f"_(No sections found — article may be a stub or redirect.)_\n\n"
+            f"[View article](https://{lang}.wikipedia.org/wiki/{_slug(page_title)})"
+        )
+    try:
+        idx, heading, anchor = _resolve_section(sections, section)
+    except ValueError as e:
+        return str(e)
+
+    params = {
+        "action": "parse",
+        "page": page_title,
+        "prop": "text",
+        "section": idx,
+        "redirects": 1,
+        "disableeditsection": 1,
+        "disablelimitreport": 1,
+        "format": "json",
+        "formatversion": "2",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        return f"Article '{title}' not found on Wikipedia."
+    html_text = (data.get("parse") or {}).get("text", "")
+    text = _html_to_text(html_text)
+    if not text:
+        return (
+            f'**"{page_title}" — {heading}**\n\n'
+            f"_(This section has no readable text — it may only contain "
+            f"templates or media.)_\n\n"
+            f"[View section]"
+            f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)}"
+            f"{('#' + anchor) if anchor else ''})"
+        )
+    frag = f"#{anchor}" if anchor else ""
+    return (
+        f"**\"{page_title}\" — {heading}**\n\n"
+        f"{text}\n\n"
+        f"[View section](https://{lang}.wikipedia.org/wiki/{_slug(page_title)}{frag})"
+    )
 
 
 def featured_article(lang: str = "en") -> str:
@@ -2598,6 +2826,47 @@ TOOLS = [
         },
     },
     {
+        "name": "section_text",
+        "description": (
+            "Read ONE section of a Wikipedia article as plain text — the "
+            "targeted-reading companion to `article_sections`. Pass a "
+            "section number exactly as shown by `article_sections` "
+            "(e.g. 2 or '2.1'; 0 reads the lead/intro), or a heading name "
+            "(case-insensitive, e.g. 'Life and career'); misspelled names "
+            "get close-match suggestions. Renders the section via the "
+            "read-only parse API "
+            "and returns clean text with paragraph structure — no need to "
+            "pull the whole 50KB+ article via `article_extract` when you "
+            "only want one part of it. Follows redirects; the link at the "
+            "bottom deep-links to the section on the article page."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Albert Einstein' or 'Paris')",
+                },
+                "section": {
+                    "type": ["integer", "string"],
+                    "description": (
+                        "Section to read: number as shown by "
+                        "`article_sections` (e.g. 2 or '2.1'; 0 = "
+                        "lead/intro), or heading text "
+                        "(e.g. 'Life and career')"
+                    ),
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title", "section"],
+        },
+    },
+    {
         "name": "featured_article",
         "description": (
             "Get today's Wikipedia Featured Article — the single article Wikipedia's editors showcase as "
@@ -3470,6 +3739,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_extract(**args)
     if name == "article_sections":
         return article_sections(**args)
+    if name == "section_text":
+        return section_text(**args)
     if name == "on_this_day":
         return on_this_day(**args)
     if name == "deaths_on_this_day":
