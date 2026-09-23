@@ -636,9 +636,9 @@ def main() -> int:
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
     section("tool registry")
-    check("all 34 tools listed", len(server.TOOLS) == 34)
+    check("all 35 tools listed", len(server.TOOLS) == 35)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1094,6 +1094,62 @@ def main() -> int:
     check("dispatcher routes to references", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", 'References cited by "Paris"' in out, out[:200])
 
+    section("section_text")
+    out = server.section_text("Albert Einstein", "Life and career")
+    check("returns heading", '"Albert Einstein" — Life and career' in out, out[:200])
+    check("real section content", "patent" in out.lower(), out[:1200])
+    check("inline CSS stripped", ".mw-parser-output" not in out and "{font-style" not in out, out[:400])
+    check("citation markers stripped", "[1]" not in out and "cite_note" not in out, out[:1200])
+    check("[edit] links stripped", "[edit]" not in out, out[:400])
+    check("deep link to section", "en.wikipedia.org/wiki/Albert_Einstein#Life_and_career" in out, out[-200:])
+
+    section("section_text — by number matches by name")
+    out_num = server.section_text("Albert Einstein", 1)
+    check("number 1 == 'Life and career'", out_num.split("\n")[0] == out.split("\n")[0], out_num[:120])
+
+    section("section_text — hierarchical number")
+    out_h = server.section_text("Albert Einstein", "1.1")
+    check("1.1 resolves", "Childhood, youth and education" in out_h, out_h[:120])
+
+    section("section_text — int means displayed number, not flat index")
+    _, _secs = server._fetch_sections("Albert Einstein", "en")
+    _want = next(_s["line"] for _s in _secs if _s.get("number") == "2")
+    out_n2 = server.section_text("Albert Einstein", 2)
+    check("int 2 == section displayed as '2.'", _want in out_n2.split("\n")[0], out_n2[:160])
+
+    section("section_text — lead section (0)")
+    out_lead = server.section_text("Albert Einstein", 0)
+    check("0 reads intro", "— Introduction" in out_lead, out_lead[:120])
+
+    section("section_text — case-insensitive name")
+    out_ci = server.section_text("Albert Einstein", "life and CAREER")
+    check("case-insensitive match", "— Life and career" in out_ci, out_ci[:120])
+
+    section("section_text — misspelled name suggests")
+    out_miss = server.section_text("Albert Einstein", "Life and carer")
+    check("suggestion offered", "Did you mean: Life and career?" in out_miss, out_miss[:200])
+
+    section("section_text — out of range")
+    out_oor = server.section_text("Albert Einstein", 999)
+    check("range message", "out of range" in out_oor and "article_sections" in out_oor, out_oor[:200])
+
+    section("section_text — missing article")
+    out_no = server.section_text("ThisArticleDoesNotExist12345", 1)
+    check("missing article returns clear message", "not found" in out_no, out_no[:120])
+
+    section("section_text — redirect follows")
+    out_red = server.section_text("Einstein", 1)  # redirects to Albert Einstein
+    check("redirect resolves", '"Albert Einstein" — Life and career' in out_red, out_red[:120])
+
+    section("section_text — german")
+    out_de = server.section_text("Albert Einstein", 1, lang="de")
+    check("german section works", "de.wikipedia.org/wiki/" in out_de and "View section" in out_de, out_de[:300])
+
+    section("section_text — dispatcher routing")
+    out_d = server._call_tool("section_text", {"title": "Paris", "section": "History"})
+    check("dispatcher routes to section_text", "Unknown tool" not in out_d, out_d[:200])
+    check("dispatcher returned real content", '"Paris" — History' in out_d and "View section" in out_d, out_d[:200])
+
     section("quote")
     out = server.quote()
     check("returns a quote", out.startswith("💬"), out[:200])
@@ -1344,6 +1400,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "references":
             out = server._call_tool(name, {"title": "Velociraptor", "limit": 2})
+        elif name == "section_text":
+            out = server._call_tool(name, {"title": "Albert Einstein", "section": 0})
         else:
             out = server._call_tool(name, {})
         check(
