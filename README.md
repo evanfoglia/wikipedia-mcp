@@ -18,6 +18,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `media_of_the_day` | Get Wikimedia Commons' Media of the Day — the curated daily video/audio clip (today, or a YYYYMMDD date) |
 | `article_extract` | Get a full plain-text extract of an article (longer than `summary`) |
 | `article_sections` | Get the table of contents (section headings) for an article — useful for navigating long articles before reading the full body |
+| `section_text` | Read one section of an article as plain text — by number, hierarchical number (e.g. `2.1`), or heading name — without pulling the whole article |
 | `on_this_day` | Get historical events that happened on today's date |
 | `deaths_on_this_day` | Get notable deaths that happened on today's date (companion to `on_this_day`) |
 | `births_on_this_day` | Get notable births that happened on today's date (companion to `on_this_day` / `deaths_on_this_day`) |
@@ -102,6 +103,10 @@ mcporter call wikipedia article_extract --args '{"title": "Tyrannosaurus"}'
 
 # Article table of contents — section headings (navigate before reading full body)
 mcporter call wikipedia article_sections --args '{"title": "Tyrannosaurus"}'
+
+# Read one section of an article (by number, "2.1", or heading name — 0 = lead/intro)
+mcporter call wikipedia section_text --args '{"title": "Tyrannosaurus", "section": "Description"}'
+mcporter call wikipedia section_text --args '{"title": "Tyrannosaurus", "section": 3}'
 
 # On this day (historical events for today)
 mcporter call wikipedia on_this_day
