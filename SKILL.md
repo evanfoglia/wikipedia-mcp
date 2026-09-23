@@ -22,6 +22,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `media_of_the_day` | Wikimedia Commons' Media of the Day — curated daily video/audio clip (default today UTC, optional YYYYMMDD date) |
 | `article_extract` | Full plain-text article extract by title (longer than `summary`) |
 | `article_sections` | Table of contents (section headings) for an article — navigate before reading the full body |
+| `section_text` | Read one section of an article as plain text — by number, hierarchical number (e.g. `2.1`), or heading name (0 = lead/intro) |
 | `on_this_day` | Historical events that happened on today's date |
 | `deaths_on_this_day` | Notable deaths that happened on today's date — companion to `on_this_day` (events) |
 | `births_on_this_day` | Notable births that happened on today's date — companion to `on_this_day` (events) and `deaths_on_this_day` (deaths) |
@@ -105,6 +106,8 @@ mcporter call wikipedia media_of_the_day
 mcporter call wikipedia media_of_the_day --args '{"date": "20260830"}'
 mcporter call wikipedia article_extract --args '{"title": "Tyrannosaurus"}'
 mcporter call wikipedia article_sections --args '{"title": "Tyrannosaurus"}'
+mcporter call wikipedia section_text --args '{"title": "Tyrannosaurus", "section": "Description"}'
+mcporter call wikipedia section_text --args '{"title": "Tyrannosaurus", "section": 3}'
 mcporter call wikipedia on_this_day
 mcporter call wikipedia on_this_day --args '{"count": 8}'
 mcporter call wikipedia deaths_on_this_day
@@ -158,7 +161,7 @@ Uses Wikipedia's free public REST API — no API key required.
 
 ## Notes
 
-- User-Agent is `wikipedia-mcp/1.1.23` per Wikipedia API etiquette
+- User-Agent is `wikipedia-mcp/1.1.24` per Wikipedia API etiquette
 - All responses include links back to the source article
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
@@ -166,6 +169,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `media_of_the_day` returns Wikimedia Commons' Media of the Day — the curated daily video or audio clip, the motion-and-sound counterpart to `picture_of_the_day`. Accepts an optional `date` (YYYYMMDD, default today UTC) to browse past picks; some dates have no Media of the Day and return a clear message. Returns the media kind, duration, a preview thumbnail (video) or listen link (audio), file name, artist, license, description, and links to the direct file + Commons file page.
 - `article_extract` returns the full plain-text article (vs `summary`'s short extract + thumbnail) — use when you need more than a summary
 - `article_sections` returns the article's table of contents — section number, heading text, and nesting level — so callers can navigate long articles (50KB+ body) by picking the section they want before committing to `article_extract`. Pairs with `summary` (lead), `article_sections` (structure), `article_extract` (full body).
+- `section_text` reads a single article section as plain text — the follow-up to `article_sections`: pass a 1-based section number (0 = lead/intro), a hierarchical number like `2.1`, or a heading name (case-insensitive, with close-match suggestions on typos). Strips inline CSS, citation markers, and edit links while keeping paragraph structure; the link at the bottom deep-links to the section. Use it instead of `article_extract` when you only need one part of a long article.
 - `on_this_day` returns historical events for today's UTC date from Wikipedia's "On This Day" feed — pairs with featured_article for daily "today in history" content hooks
 - `deaths_on_this_day` returns notable deaths for today's UTC date — the deaths-only companion to `on_this_day`. Pairs with `on_this_day` (events) and `featured_article` (today's long-form) for a full "today in Wikipedia" daily digest. Useful for "in memoriam" content hooks and obituary-style social posts.
 - `births_on_this_day` returns notable births for today's UTC date — the births companion to `on_this_day` (events) and `deaths_on_this_day` (deaths), completing the "today in Wikipedia" trio. Useful for "born on this day" content hooks and birthday round-ups.
