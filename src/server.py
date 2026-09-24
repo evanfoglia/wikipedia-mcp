@@ -2653,6 +2653,116 @@ def references(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def revision_diff(title: str, rev_from: int, rev_to: int, limit: int = 100,
+                  lang: str = "en") -> str:
+    """Compare two revisions of an article and show exactly what changed.
+
+    Returns a plain-text unified diff of the article's wikitext between
+    revision rev_from and revision rev_to (get revision IDs from the
+    `revisions` tool). Each side of the diff is labelled with its
+    timestamp, editor, and edit summary, so the change is self-explanatory.
+    This is the edit-auditing companion to `revisions` (which lists the
+    log but not the content change): use it to see what a specific edit
+    added or removed, review edits before trusting a new paragraph,
+    audit what a breaking-news change rewrote, or spot stealth rewrites.
+
+    Fetches both revisions' wikitext in a single read-only action API
+    call (GET only, no new dependencies) and diffs locally with stdlib
+    difflib, so the output is a familiar +/- unified diff instead of
+    Wikipedia's HTML. `limit` clamps the number of diff lines shown
+    (default 100, max 500); oversized diffs are truncated with a note.
+    The footer links to the equivalent on-wiki side-by-side view.
+    """
+    try:
+        limit = max(1, min(int(limit), 500))
+    except (TypeError, ValueError):
+        limit = 100
+    try:
+        rev_from = int(rev_from)
+        rev_to = int(rev_to)
+    except (TypeError, ValueError):
+        return ("Error: rev_from and rev_to must be revision IDs (integers). "
+                "Get revision IDs from the `revisions` tool.")
+    if rev_from == rev_to:
+        return "rev_from and rev_to are the same revision — nothing to diff."
+    params = {
+        "action": "query",
+        "prop": "revisions",
+        "revids": f"{rev_from}|{rev_to}",
+        "rvprop": "ids|timestamp|user|comment|content",
+        "rvslots": "main",
+        "format": "json",
+        "formatversion": "2",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    resp.raise_for_status()
+    data = resp.json()
+
+    # Invalid revision IDs come back as a 200 OK with an `error` block.
+    if "error" in data:
+        return (f"Couldn't fetch revisions {rev_from}/{rev_to}: "
+                f"{data['error'].get('info', 'unknown error')}.")
+    pages = data.get("query", {}).get("pages", [])
+    if not pages:
+        return (f"Couldn't fetch revisions {rev_from}/{rev_to}: "
+                "no pages returned — check the revision IDs.")
+    if len(pages) > 1:
+        return ("Error: the two revision IDs belong to different articles — "
+                "both revisions must come from the same page.")
+
+    page = pages[0]
+    page_title = page.get("title", title)
+    revs = {r.get("revid"): r for r in page.get("revisions", [])}
+    missing = [r for r in (rev_from, rev_to) if r not in revs]
+    if missing:
+        return (f"Revision(s) {', '.join(map(str, missing))} not found for "
+                f"'{page_title}' — they may not exist, be deleted/suppressed, "
+                "or be on another wiki.")
+
+    def _label(revid):
+        r = revs[revid]
+        ts = (r.get("timestamp") or "?")[:16].replace("T", " ")
+        user = r.get("user", "?")
+        comment = (r.get("comment") or "").strip() or "(no edit summary)"
+        if len(comment) > 160:
+            comment = comment[:157] + "..."
+        return f"rev {revid} — **{user}** ({ts}): {comment}"
+
+    old = revs[rev_from]["slots"]["main"]["content"].splitlines()
+    new = revs[rev_to]["slots"]["main"]["content"].splitlines()
+    diff = list(difflib.unified_diff(
+        old, new,
+        fromfile=f"rev {rev_from}", tofile=f"rev {rev_to}",
+        n=3, lineterm="",
+    ))
+    if not diff:
+        return (
+            f'**Revision diff for "{page_title}"**\n\n'
+            f"From: {_label(rev_from)}\n"
+            f"To: {_label(rev_to)}\n\n"
+            "No differences — the two revisions have identical content."
+        )
+
+    truncated = len(diff) > limit
+    out = (
+        f'**Revision diff for "{page_title}"** '
+        f"(rev {rev_from} → rev {rev_to})\n\n"
+        f"From: {_label(rev_from)}\n"
+        f"To: {_label(rev_to)}\n\n"
+        "```diff\n" + "\n".join(diff[:limit]) + "\n```\n"
+    )
+    if truncated:
+        out += (
+            f"\n_Diff truncated at {limit} of {len(diff)} lines — "
+            "raise `limit` (max 500) to see more._\n"
+        )
+    diff_url = (f"https://{lang}.wikipedia.org/w/index.php"
+                f"?title={_slug(page_title)}&diff={rev_to}&oldid={rev_from}")
+    out += f"\n[View on-wiki side-by-side diff]({diff_url})"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -3715,6 +3825,46 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "revision_diff",
+        "description": (
+            "Compare two revisions of an article and show exactly what changed — a plain-text "
+            "unified diff of the article's wikitext between revision rev_from and rev_to "
+            "(get revision IDs from `revisions`). Each side is labelled with its timestamp, "
+            "editor, and edit summary. The edit-auditing companion to `revisions`: use it to "
+            "see what a specific edit added or removed, review edits before trusting a new "
+            "paragraph, or spot stealth rewrites. `limit` clamps diff lines (default 100, max 500)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Tyrannosaurus')",
+                },
+                "rev_from": {
+                    "type": "integer",
+                    "description": "Older revision ID (from `revisions`)",
+                },
+                "rev_to": {
+                    "type": "integer",
+                    "description": "Newer revision ID (from `revisions`)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max diff lines to show (default 100, max 500)",
+                    "default": 100,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title", "rev_from", "rev_to"],
+        },
+    },
 ]
 
 
@@ -3789,6 +3939,8 @@ def _call_tool(name: str, args: dict) -> str:
         return contributors(**args)
     if name == "references":
         return references(**args)
+    if name == "revision_diff":
+        return revision_diff(**args)
     return f"Unknown tool: {name}"
 
 
