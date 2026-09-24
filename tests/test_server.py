@@ -635,10 +635,59 @@ def main() -> int:
     check("dispatcher routes to revisions", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", out.startswith("**Revision history of"), out[:200])
 
+    section("revision_diff")
+    out = server.revision_diff("Python_(programming_language)", 1374673264, 1374673393)
+    check("returns header", 'Revision diff for "Python (programming language)"' in out, out[:200])
+    check("from/to labels present", "rev 1374673264" in out and "rev 1374673393" in out, out[:500])
+    check("editor + summary shown", "MrOllie" in out and "cut inline external links" in out, out[:700])
+    check(
+        "unified diff block",
+        "```diff" in out and "\n--- rev 1374673264" in out and "\n+++ rev 1374673393" in out,
+        out[:900],
+    )
+    changed = [
+        l
+        for l in out.split("\n")
+        if (l.startswith("-") and not l.startswith("---"))
+        or (l.startswith("+") and not l.startswith("+++"))
+    ]
+    check(
+        "changed lines marked +/-",
+        any(l.startswith("-") for l in changed) and any(l.startswith("+") for l in changed),
+        f"got {len(changed)} changed lines",
+    )
+    check("on-wiki diff link", "diff=1374673393&oldid=1374673264" in out, out[-300:])
+
+    section("revision_diff — limit clamping + type safety")
+    out = server.revision_diff("Python_(programming_language)", 1374673264, 1374673393, limit=5)
+    check("truncation note shown", "truncated" in out, out[-400:])
+    out = server.revision_diff("Python_(programming_language)", 1374673264, 1374673393, limit="abc")
+    check("non-int limit returns results (no crash)", "Revision diff for" in out, out[:200])
+
+    section("revision_diff — identical revisions")
+    out = server.revision_diff("Python_(programming_language)", 1374673264, 1374673264)
+    check("same revision returns clear message", "nothing to diff" in out, out[:200])
+
+    section("revision_diff — bad revision id")
+    out = server.revision_diff("Python_(programming_language)", 1374673264, 999999999999)
+    check("bad revid returns clear error", "not found" in out, out[:300])
+
+    section("revision_diff — non-integer revid")
+    out = server.revision_diff("Python_(programming_language)", "abc", 1374673393)
+    check("non-int revid returns error", "must be revision IDs" in out, out[:200])
+
+    section("revision_diff — dispatcher routing")
+    out = server._call_tool(
+        "revision_diff",
+        {"title": "Python_(programming_language)", "rev_from": 1374673264, "rev_to": 1374673393},
+    )
+    check("dispatcher routes to revision_diff", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Revision diff for" in out, out[:200])
+
     section("tool registry")
-    check("all 35 tools listed", len(server.TOOLS) == 35)
+    check("all 36 tools listed", len(server.TOOLS) == 36)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1402,6 +1451,11 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor", "limit": 2})
         elif name == "section_text":
             out = server._call_tool(name, {"title": "Albert Einstein", "section": 0})
+        elif name == "revision_diff":
+            out = server._call_tool(
+                name,
+                {"title": "Python_(programming_language)", "rev_from": 1374673264, "rev_to": 1374673393},
+            )
         else:
             out = server._call_tool(name, {})
         check(
