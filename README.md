@@ -43,6 +43,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `related_articles` | Find articles semantically similar to a given article ("what should I read next") — Wikipedia's own MoreLikeThis search ranking, each with short description + thumbnail |
 | `contributors` | Who writes and maintains an article — most active recent editors ranked by edit count (up to 500 sampled revisions), with user-page links + anonymous (IP) edit share; the provenance companion to `article_quality` |
 | `references` | The sources an article cites — its bibliography: each citation's text plus the off-wiki URLs it points to (DOI, publisher, archive, primary-source links); the verification companion to `external_links` |
+| `revision_diff` | Compare two revisions of an article — plain-text unified diff of what a specific edit changed, each side labelled with timestamp, editor, and edit summary |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
