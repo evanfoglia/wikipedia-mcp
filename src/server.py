@@ -21,7 +21,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.25"
+SERVER_VERSION = "1.1.26"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -4208,3 +4208,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
