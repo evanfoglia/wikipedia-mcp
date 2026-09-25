@@ -684,10 +684,40 @@ def main() -> int:
     check("dispatcher routes to revision_diff", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Revision diff for" in out, out[:200])
 
+    section("disambiguation")
+    out = server.disambiguation("Mercury")
+    check("detects dab page", "is a disambiguation page" in out, out[:200])
+    check("lists planet option", "Mercury (planet)" in out, out[:2000])
+    check("lists element option", "Mercury (element)" in out, out[:2000])
+    check("descriptions present", "closest planet to the Sun" in out, out[:2000])
+    check("sections grouped", "**Companies**" in out or "**Computing**" in out, out[:4000])
+    check("wikipedia link included", "en.wikipedia.org/wiki/Mercury" in out, out[-200:])
+
+    section("disambiguation — limit clamping + type safety")
+    out = server.disambiguation("Mercury", limit=5)
+    check("limit respected", out.count("\n- **") <= 5, out[:500])
+    out = server.disambiguation("Mercury", limit=999)
+    check("limit clamps to 100", "raise `limit` (max 100)" in out or out.count("\n- **") <= 100)
+    out = server.disambiguation("Mercury", limit="abc")
+    check("non-int limit returns options (no crash)", "is a disambiguation page" in out, out[:200])
+
+    section("disambiguation — regular article")
+    out = server.disambiguation("Tyrannosaurus")
+    check("regular article reported", "not a disambiguation page" in out, out[:200])
+
+    section("disambiguation — missing article")
+    out = server.disambiguation("ThisArticleDoesNotExist12345")
+    check("missing article returns clear error", "not found" in out, out[:200])
+
+    section("disambiguation — dispatcher routing")
+    out = server._call_tool("disambiguation", {"title": "Apple"})
+    check("dispatcher routes to disambiguation", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "disambiguation page" in out, out[:200])
+
     section("tool registry")
-    check("all 36 tools listed", len(server.TOOLS) == 36)
+    check("all 37 tools listed", len(server.TOOLS) == 37)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1456,6 +1486,8 @@ def main() -> int:
                 name,
                 {"title": "Python_(programming_language)", "rev_from": 1374673264, "rev_to": 1374673393},
             )
+        elif name == "disambiguation":
+            out = server._call_tool(name, {"title": "Mercury"})
         else:
             out = server._call_tool(name, {})
         check(

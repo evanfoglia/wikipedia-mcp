@@ -2764,6 +2764,152 @@ def revision_diff(title: str, rev_from: int, rev_to: int, limit: int = 100,
 
 
 # ---------------------------------------------------------------------------
+# Disambiguation helpers — detect dab pages and extract their option lists.
+# ---------------------------------------------------------------------------
+_DAB_SKIP_NS = (
+    "File", "Image", "Category", "Template", "Help", "Wikipedia", "Portal",
+    "Draft", "User", "Talk", "Special", "MediaWiki", "Module", "Wiktionary",
+    "Wikiquote", "Wikisource", "Wikibooks", "Wikivoyage", "Wikinews",
+    "Wikiversity", "Commons", "Meta",
+)
+_DAB_LINK_RE = re.compile(r"\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]")
+_DAB_SECTION_RE = re.compile(r"^={2,}\s*(.+?)\s*={2,}\s*$")
+
+
+def _strip_dab_markup(text: str) -> str:
+    """Collapse wikitext markup in a disambiguation entry to plain text."""
+    text = re.sub(r"<ref[^>]*>.*?</ref\s*>", "", text, flags=re.S | re.I)
+    text = re.sub(r"<ref[^>]*/\s*>", "", text, flags=re.I)
+    prev = None
+    while prev != text:  # peel nested templates inside-out
+        prev = text
+        text = re.sub(r"\{\{[^{}]*\}\}", "", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("'''", "").replace("''", "")
+    text = re.sub(r"\[\[[^\]|]*\|([^\]]+)\]\]", r"\1", text)
+    text = re.sub(r"\[\[([^\]]+)\]\]", r"\1", text)
+    text = re.sub(r"\s+", " ", text).strip(" -,;:")
+    return text
+
+
+def disambiguation(title: str, limit: int = 30, lang: str = "en") -> str:
+    """Resolve a Wikipedia disambiguation page into its candidate articles.
+
+    Detects whether `title` is a disambiguation page (via the pageprops
+    marker) and, if so, returns its options — article title plus a one-line
+    description — grouped by the page's own sections. This resolves the
+    classic agent dead-end where `search`/`summary` land on an ambiguous
+    title and return mush: call this, pick the right candidate, then fetch
+    it with `summary`/`article_extract`. Main-namespace article links
+    only; file/category/template links are filtered out.
+    """
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        limit = 30
+    api = _wiki(lang)
+
+    # 1. Confirm the title is actually a disambiguation page.
+    resp = _get(api, params={
+        "action": "query", "prop": "pageprops", "ppprop": "disambiguation",
+        "titles": title, "redirects": 1, "format": "json", "origin": "*",
+    })
+    resp.raise_for_status()
+    pages = resp.json().get("query", {}).get("pages", {})
+    if not pages:
+        return f"Article '{title}' not found on Wikipedia."
+    page = next(iter(pages.values()))
+    if page.get("missing") is not None:
+        return f"Article '{title}' not found on Wikipedia."
+    page_title = page.get("title", title)
+    if "disambiguation" not in page.get("pageprops", {}):
+        return (
+            f"\"{page_title}\" is not a disambiguation page on Wikipedia — "
+            "it's a regular article. Use `summary` for an overview, or "
+            "`search` to find similarly-named articles."
+        )
+
+    # 2. Fetch the wikitext and parse its option list.
+    resp = _get(api, params={
+        "action": "parse", "page": page_title, "prop": "wikitext",
+        "format": "json", "origin": "*",
+    })
+    resp.raise_for_status()
+    pdata = resp.json().get("parse", {})
+    wikitext = pdata.get("wikitext", {}).get("*", "")
+    if not wikitext:
+        return f"Could not read the disambiguation page for '{page_title}'."
+
+    sections = []  # (section_name, [(target, display, description)])
+    current = ("Top matches", [])
+    sections.append(current)
+    seen = set()
+    total = 0
+    truncated = False
+
+    for raw in wikitext.split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        sm = _DAB_SECTION_RE.match(line)
+        if sm:
+            name = _strip_dab_markup(sm.group(1))
+            if name.lower() not in ("see also",):
+                current = (name, [])
+                sections.append(current)
+            else:  # keep "See also" as its own labeled group
+                current = ("See also", [])
+                sections.append(current)
+            continue
+        if not line.startswith(("*", "#")):
+            continue
+        item = line.lstrip("*#:;").strip()
+        lm = _DAB_LINK_RE.search(item)
+        if not lm:
+            continue  # unlinked prose — not a candidate article
+        target = lm.group(1).strip()
+        if "#" in target:  # section anchor — link the base article
+            target = target.split("#", 1)[0].strip()
+        if ":" in target:
+            prefix = target.split(":", 1)[0]
+            if prefix in _DAB_SKIP_NS:
+                continue  # File:/Category:/etc. — not an article
+        if not target or target.lower() in seen:
+            continue
+        seen.add(target.lower())
+        display = _strip_dab_markup(lm.group(2) or target)
+        desc = _strip_dab_markup(item[lm.end():])
+        if total >= limit:
+            truncated = True
+            continue
+        current[1].append((target, display, desc))
+        total += 1
+
+    nonempty = [(name, items) for name, items in sections if items]
+    if not nonempty:
+        return (
+            f"\"{page_title}\" is marked as a disambiguation page, but no "
+            "candidate articles could be extracted from it."
+        )
+
+    out = (f"**\"{page_title}\" is a disambiguation page** — "
+           f"{total} option{'s' if total != 1 else ''}:\n")
+    for name, items in nonempty:
+        out += f"\n**{name}**\n"
+        for target, display, desc in items:
+            line = f"- **{display}**"
+            if desc:
+                line += f" — {desc}"
+            out += line + "\n"
+    if truncated:
+        out += (f"\n_List truncated at {limit} options — raise `limit` "
+                f"(max 100) to see more._\n")
+    out += (f"\n[View disambiguation page]"
+            f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -3865,6 +4011,41 @@ TOOLS = [
             "required": ["title", "rev_from", "rev_to"],
         },
     },
+    {
+        "name": "disambiguation",
+        "description": (
+            "Resolve a Wikipedia disambiguation page into its candidate "
+            "articles. Detects whether a title (e.g. 'Mercury', 'Apple', "
+            "'Python') is a disambiguation page and, if so, returns the "
+            "structured option list — article title plus one-line "
+            "description — grouped by the page's own sections. Resolves "
+            "the classic dead-end where `search`/`summary` land on an "
+            "ambiguous title: call this, pick the right candidate, then "
+            "fetch it with `summary` or `article_extract`. Reports "
+            "clearly when the title is a regular article or doesn't exist."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Mercury' or 'Apple')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max options to return (default 30, max 100)",
+                    "default": 30,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title"],
+        },
+    },
 ]
 
 
@@ -3941,6 +4122,8 @@ def _call_tool(name: str, args: dict) -> str:
         return references(**args)
     if name == "revision_diff":
         return revision_diff(**args)
+    if name == "disambiguation":
+        return disambiguation(**args)
     return f"Unknown tool: {name}"
 
 
