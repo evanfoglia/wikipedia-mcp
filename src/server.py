@@ -2908,6 +2908,115 @@ def disambiguation(title: str, limit: int = 30, lang: str = "en") -> str:
             f"(https://{lang}.wikipedia.org/wiki/{_slug(page_title)})")
     return out
 
+def user_contribs(user: str, limit: int = 10, namespace: int = 0,
+                  lang: str = "en") -> str:
+    """What a Wikipedia editor has been doing — their recent contributions.
+
+    Uses the read-only `list=usercontribs` action API to show the latest
+    edits by a named account (or an IP address, e.g. ``user_contribs(user=
+    "192.0.2.1")``) — edited pages, timestamps, byte-size deltas, edit
+    comments, and flags for new pages, minor edits, and edits that are
+    still the current version. The account header includes registration
+    date and total edit count (when the account exists).
+
+    The reverse angle of `contributors` (who edits *this article*): this
+    shows what *one editor* touches across the encyclopedia. Use it to
+    profile a top contributor, audit an anonymous IP's activity, or spot
+    single-purpose accounts (e.g. an editor whose only contributions are
+    to one company's article — a conflict-of-interest tell). `namespace`
+    scopes the search (default 0 = articles; 3 = user talk, etc.).
+    Read-only — GET only, no new dependencies.
+    """
+    user = str(user or "").strip()
+    if not user:
+        return "Provide a Wikipedia username or IP address."
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 10
+    try:
+        namespace = int(namespace)
+    except (TypeError, ValueError):
+        namespace = 0
+    api = _wiki(lang)
+    base = api.replace("/w/api.php", "")
+
+    # 1. Account header — registration date and lifetime edit count.
+    header = None
+    try:
+        uresp = _get(api, params={
+            "action": "query", "list": "users", "ususers": user,
+            "usprop": "editcount|registration", "format": "json", "origin": "*",
+        })
+        uresp.raise_for_status()
+        udata = uresp.json()
+        if "error" in udata:
+            return f"Could not look up '{user}': {udata['error'].get('info', 'API error')}"
+        uentry = (udata.get("query", {}).get("users") or [{}])[0]
+        display = uentry.get("name", user)
+        if "missing" in uentry:
+            header = f"**{display}** — no registered account with this name"
+        elif "invalid" in uentry:
+            header = f"**{display}** — anonymous editor (no account, IP address)"
+        else:
+            reg = (uentry.get("registration") or "")[:10] or "unknown"
+            count = uentry.get("editcount", "?")
+            if isinstance(count, int):
+                count = f"{count:,}"
+            header = f"**{display}** — registered {reg}, {count} edits total"
+    except Exception:
+        header = f"**{user}**"
+
+    # 2. The contributions themselves.
+    try:
+        cresp = _get(api, params={
+            "action": "query", "list": "usercontribs", "ucuser": user,
+            "uclimit": str(limit),
+            "ucprop": "ids|title|timestamp|comment|sizediff|flags",
+            "ucnamespace": str(namespace),
+            "format": "json", "origin": "*",
+        })
+        cresp.raise_for_status()
+        cdata = cresp.json()
+    except Exception:
+        return f"{header}\n\nCould not fetch contributions from Wikipedia."
+    if "error" in cdata:
+        info = cdata["error"].get("info", "API error")
+        if "invalid" in str(info).lower():
+            return f"'{user}' is not a valid Wikipedia username or IP address."
+        return f"{header}\n\nCould not fetch contributions: {info}"
+
+    contribs = cdata.get("query", {}).get("usercontribs", [])
+    if not contribs:
+        return (f"{header}\n\nNo contributions found in namespace {namespace} — "
+                "the account may be new, renamed, or inactive.")
+
+    nss = "articles" if namespace == 0 else f"namespace {namespace}"
+    out = f"{header}\n**Latest contributions ({nss})**\n\n"
+    for i, c in enumerate(contribs, 1):
+        title = c.get("title", "?")
+        link = f"[{title}]({base}/wiki/{_slug(title)})"
+        ts = (c.get("timestamp") or "").replace("T", " ").rstrip("Z") + " UTC"
+        delta = c.get("sizediff")
+        size = f" ({delta:+,d} bytes)" if isinstance(delta, (int, float)) else ""
+        flags = []
+        if c.get("new"):
+            flags.append("new page")
+        if c.get("top"):
+            flags.append("still current")
+        if c.get("minor"):
+            flags.append("minor")
+        flags_txt = f" [{', '.join(flags)}]" if flags else ""
+        out += f"{i}. {link} — {ts}{size}{flags_txt}\n"
+        comment = (c.get("comment") or "").strip()
+        if comment:
+            short = comment if len(comment) <= 120 else comment[:117] + "…"
+            out += f'   _"{short}"_\n'
+        revid, parentid = c.get("revid"), c.get("parentid")
+        if revid and parentid:
+            out += f"   [diff]({base}/w/index.php?diff={revid}&oldid={parentid})\n"
+    return out
+
 
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
@@ -4046,6 +4155,49 @@ TOOLS = [
             "required": ["title"],
         },
     },
+    {
+        "name": "user_contribs",
+        "description": (
+            "What a Wikipedia editor has been doing — their recent "
+            "contributions across the encyclopedia. Shows the latest edits "
+            "by a named account (or an IP address, e.g. user='192.0.2.1'): "
+            "edited pages, timestamps, byte-size deltas, edit comments, "
+            "and flags for new pages, minor edits, and edits still current. "
+            "The header reports registration date and total edit count. The "
+            "reverse angle of `contributors` (who edits this article): "
+            "profile a top contributor, audit an anonymous IP's activity, or "
+            "spot single-purpose accounts (edits confined to one topic hint "
+            "at a conflict of interest). `namespace` scopes the search "
+            "(default 0 = articles). Read-only — GET only, no new "
+            "dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "user": {
+                    "type": "string",
+                    "description": "Wikipedia username or IP address (e.g. 'Jimbo Wales')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max contributions to return (default 10, max 50)",
+                    "default": 10,
+                },
+                "namespace": {
+                    "type": "integer",
+                    "description": "Namespace to search (default 0 = articles; 3 = user talk)",
+                    "default": 0,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["user"],
+        },
+    },
 ]
 
 
@@ -4124,6 +4276,8 @@ def _call_tool(name: str, args: dict) -> str:
         return revision_diff(**args)
     if name == "disambiguation":
         return disambiguation(**args)
+    if name == "user_contribs":
+        return user_contribs(**args)
     return f"Unknown tool: {name}"
 
 
