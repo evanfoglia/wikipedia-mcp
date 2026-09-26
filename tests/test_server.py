@@ -714,10 +714,42 @@ def main() -> int:
     check("dispatcher routes to disambiguation", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "disambiguation page" in out, out[:200])
 
+
+    section("user_contribs")
+    out = server.user_contribs("Jimbo Wales", limit=3)
+    check("header names account", "**Jimbo Wales**" in out, out[:300])
+    check("header shows registration date", "registered 2001-03-27" in out, out[:300])
+    check("header shows total edit count", "edits total" in out, out[:300])
+    check("lists contributions", "Latest contributions" in out, out[:300])
+    numbered = sum(1 for i in range(1, 11) if f"\n{i}. " in out)
+    check("limit respected", 1 <= numbered <= 3, f"got {numbered} entries")
+    check("diff links included", "/w/index.php?diff=" in out, out[:2000])
+
+    section("user_contribs — clamping + type safety")
+    out = server.user_contribs("Jimbo Wales", limit=500)
+    numbered = sum(1 for i in range(1, 60) if f"\n{i}. " in out)
+    check("limit clamps to 50", numbered <= 50, f"got {numbered} entries")
+    out = server.user_contribs("Jimbo Wales", limit="abc")
+    check("non-int limit returns contribs (no crash)", "Latest contributions" in out, out[:200])
+    out = server.user_contribs("Jimbo Wales", limit=-5)
+    numbered = sum(1 for i in range(1, 5) if f"\n{i}. " in out)
+    check("limit=-5 clamps to 1", numbered == 1, f"got {numbered} entries")
+
+    section("user_contribs — unknown and empty users")
+    out = server.user_contribs("ThisAccountDoesNotExistZZZ123")
+    check("unknown account reported", "no registered account" in out, out[:300])
+    check("no contribs stated", "No contributions found" in out, out[:400])
+    out = server.user_contribs("")
+    check("empty user rejected", "Provide a Wikipedia username" in out, out[:200])
+
+    section("user_contribs — dispatcher routing")
+    out = server._call_tool("user_contribs", {"user": "Jimbo Wales"})
+    check("dispatcher routes to user_contribs", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Latest contributions" in out, out[:200])
     section("tool registry")
-    check("all 37 tools listed", len(server.TOOLS) == 37)
+    check("all 38 tools listed", len(server.TOOLS) == 38)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation"}
+    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1488,6 +1520,8 @@ def main() -> int:
             )
         elif name == "disambiguation":
             out = server._call_tool(name, {"title": "Mercury"})
+        elif name == "user_contribs":
+            out = server._call_tool(name, {"user": "Jimbo Wales", "limit": 2})
         else:
             out = server._call_tool(name, {})
         check(
