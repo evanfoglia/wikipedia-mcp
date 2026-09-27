@@ -15,6 +15,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `search` | Search Wikipedia for articles |
 | `summary` | Get article summary + image by title |
 | `random` | Random Wikipedia article |
+| `simple_summary` | Simple English Wikipedia version of a topic — plain-language explanation |
 | `did_you_know` | Random "Did You Know" fact |
 | `dino_fact` | Dinosaur/prehistory fact (specific species or random) |
 | `featured_article` | Today's Wikipedia Featured Article |
@@ -148,6 +149,7 @@ mcporter call wikipedia references --args '{"title": "Albert Einstein"}'
 mcporter call wikipedia references --args '{"title": "Velociraptor", "limit": 10}'
 mcporter call wikipedia quote
 mcporter call wikipedia infobox --args '{"title": "Albert Einstein"}'
+mcporter call wikipedia simple_summary --args '{"title": "Photosynthesis"}'
 mcporter call wikipedia summary --args '{"title": "Berlin", "lang": "de"}'
 ```
 
@@ -196,6 +198,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - `revision_diff` answers "what did this edit actually change" — give it two revision IDs (from `revisions`) and it returns a plain-text unified diff of the article's wikitext between them, each side labelled with timestamp, editor, and edit summary, plus a link to the on-wiki side-by-side view. Fetches both revisions in one read-only action API call and diffs locally with stdlib difflib (no new dependencies); `limit` clamps diff lines (default 100, max 500). The edit-auditing companion to `revisions` (the log): review edits before trusting a new paragraph, audit what a breaking-news change removed, spot stealth rewrites.
 - `disambiguation` answers "which article did you mean" — given an ambiguous title like 'Mercury' or 'Apple', it verifies the disambiguation marker via pageprops and returns the page's own option list (article title + one-line description), grouped by section (e.g. Companies, Film and television), main-namespace links only. Reports clearly when the title is a regular article (use `summary` instead) or doesn't exist. The disambiguation companion to `search`: call this when `search`/`summary` land on an ambiguous page, pick the right candidate, then fetch it with `summary` or `article_extract`; `limit` clamps options (default 30, max 100).
 - `user_contribs` answers "what has this editor been doing" — the reverse angle of `contributors` (which profiles an *article's* editors): given a username or IP address, it shows their latest edits across the encyclopedia via the read-only `list=usercontribs` action API. Each entry shows the page link, timestamp, byte-size delta, edit comment, diff link, and flags for new pages, minor edits, and edits still current. The header reports the account's registration date and lifetime edit count (or states plainly when the name has no registered account — an IP can still have contributions). Use it to profile a top contributor surfaced by `contributors`, audit an anonymous IP's activity, or spot single-purpose accounts whose edits are confined to one topic (a conflict-of-interest tell). `namespace` scopes the search (default 0 = articles); limit clamps to 50.
+- `simple_summary` answers "explain it simply" — it fetches the same topic from Simple English Wikipedia (simple.wikipedia.org), where articles are rewritten in short sentences with common words, and renders it in the same title + summary + thumbnail + read-more shape as `summary`. The accessibility companion to `summary`/`article_extract`: reach for it for kids, ESL readers, or a quick low-jargon intuition of a dense topic, then graduate to `summary` for the full article. Reports clearly when no Simple English article exists for the topic. No `lang` parameter — Simple English is its own wiki.
 - Multi-language: pass `lang` to any tool to query de/es/fr/ja/zh/pt/it/ru/nl Wikipedia
 
 ## ClawHub
