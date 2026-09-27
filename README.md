@@ -11,6 +11,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `search` | Search Wikipedia for articles matching a query |
 | `summary` | Get a Wikipedia article summary + thumbnail by title |
 | `random` | Get a random Wikipedia article summary |
+| `simple_summary` | Get the Simple English Wikipedia version of a topic — plain-language explanation |
 | `did_you_know` | Get a random "Did You Know" style fact |
 | `dino_fact` | Get a dino/prehistory-specific fact (specific species or random) |
 | `featured_article` | Get today's Wikipedia Featured Article |
@@ -47,7 +48,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `disambiguation` | Resolve a disambiguation page into its candidate articles — title + one-line description, grouped by section; pick the right one, then fetch it |
 | `user_contribs` | What a Wikipedia editor has been doing — latest contributions by a username or IP (timestamp, byte delta, edit comment, new-page/minor/current flags), with registration date + total edit count; profile contributors or audit anonymous IPs |
 
-All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
+All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang` — and `simple_summary`, which always reads Simple English Wikipedia. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
 ## Setup
 
@@ -83,6 +84,9 @@ mcporter call wikipedia summary --args '{"title": "Tyrannosaurus"}'
 
 # Random article
 mcporter call wikipedia random
+
+# Simple English explanation ("explain it simply")
+mcporter call wikipedia simple_summary --args '{"title": "Photosynthesis"}'
 
 # Random dino fact
 mcporter call wikipedia dino_fact

@@ -86,6 +86,22 @@ def main() -> int:
     out = server.get_random()
     check("title rendered", out.startswith("## "), out[:200])
 
+    section("get_simple_summary")
+    out = server.get_simple_summary("Photosynthesis")
+    check("title rendered", "## Photosynthesis" in out, out[:200])
+    check("read more link", "Read more" in out)
+    check("points at simple.wikipedia.org", "simple.wikipedia.org" in out, out[-200:])
+
+    section("get_simple_summary — missing article")
+    out = server.get_simple_summary("Xyzzynonesuchqqq")
+    check("graceful not-found", "No Simple English article" in out, out[:200])
+    check("points at summary", "`summary`" in out, out[:200])
+
+    section("get_simple_summary — input edge cases")
+    # Empty title → URL becomes /page/summary/ → 404 → graceful message.
+    out = server.get_simple_summary("")
+    check("empty title graceful", "No Simple English article" in out, out[:200])
+
     section("did_you_know")
     out = server.did_you_know()
     check("Did you know prefix", "Did you know" in out, out[:200])
@@ -747,9 +763,9 @@ def main() -> int:
     check("dispatcher routes to user_contribs", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Latest contributions" in out, out[:200])
     section("tool registry")
-    check("all 38 tools listed", len(server.TOOLS) == 38)
+    check("all 39 tools listed", len(server.TOOLS) == 39)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1522,6 +1538,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Mercury"})
         elif name == "user_contribs":
             out = server._call_tool(name, {"user": "Jimbo Wales", "limit": 2})
+        elif name == "simple_summary":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         else:
             out = server._call_tool(name, {})
         check(

@@ -42,6 +42,10 @@ def _wiki(lang: str = "en") -> str:
     return f"https://{lang}.wikipedia.org/w/api.php"
 
 
+# Simple English Wikipedia — same read-only REST API, plain-language articles.
+_SIMPLE_BASE = "https://simple.wikipedia.org/api/rest_v1"
+
+
 def _get(url: str, params: Optional[dict] = None) -> requests.Response:
     return requests.get(
         url, params=params, headers={"User-Agent": USER_AGENT}, timeout=DEFAULT_TIMEOUT
@@ -343,6 +347,25 @@ def get_random(lang: str = "en") -> str:
     resp = _get(f"{_base(lang)}/page/random/summary")
     resp.raise_for_status()
     return _summary_block(resp.json(), fallback_title="Random Article")
+
+
+def get_simple_summary(title: str) -> str:
+    """Get the Simple English Wikipedia version of a topic — plain-language explanation.
+
+    Same markdown shape as `summary` (title + extract + thumbnail + read-more link),
+    but the prose is written for easy reading: short sentences, common words. Best
+    when the caller wants "explain it simply" (kids, ESL readers, quick intuition)
+    or the full article is too dense. Not every topic has a Simple English article —
+    in that case the reply says so and points at `summary` for the full version.
+    """
+    resp = _get(f"{_SIMPLE_BASE}/page/summary/{_slug(title)}")
+    if resp.status_code == 404:
+        return (
+            f"No Simple English article found for '{title}'. Not every topic has a "
+            f"simplified version — use `summary` for the full English article."
+        )
+    resp.raise_for_status()
+    return _summary_block(resp.json(), fallback_title=title)
 
 
 def did_you_know(lang: str = "en") -> str:
@@ -3097,6 +3120,26 @@ TOOLS = [
         },
     },
     {
+        "name": "simple_summary",
+        "description": (
+            "Get the Simple English Wikipedia version of a topic by title — a plain-language "
+            "explanation written in short sentences with common words, in the same title + summary + "
+            "thumbnail shape as `summary`. Use when you want \"explain it simply\" (kids, ESL readers, "
+            "quick intuition) or the full article is too dense. Reports clearly when no Simple English "
+            "article exists for the topic, pointing you at `summary` for the full version."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'Photosynthesis' or 'Quantum_mechanics')",
+                },
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "did_you_know",
         "description": "Get a random 'Did You Know' style fact from Wikipedia — great for hooks and general trivia",
         "inputSchema": {
@@ -4208,6 +4251,8 @@ def _call_tool(name: str, args: dict) -> str:
         return get_summary(**args)
     if name == "random":
         return get_random(**args)
+    if name == "simple_summary":
+        return get_simple_summary(**args)
     if name == "did_you_know":
         return did_you_know(**args)
     if name == "dino_fact":
