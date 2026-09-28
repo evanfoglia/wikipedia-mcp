@@ -3042,6 +3042,152 @@ def user_contribs(user: str, limit: int = 10, namespace: int = 0,
 
 
 # ---------------------------------------------------------------------------
+# citation_needed — find unsourced statements ("citation needed" tags)
+# ---------------------------------------------------------------------------
+_CN_TAG_RE = re.compile(
+    r"\{\{\s*(citation needed|cn|fact|verify source|cnf|unreferenced)\s*"
+    r"(\|[^}]*)?\}\}",
+    re.IGNORECASE,
+)
+_CN_TMPL_RE = re.compile(r"\{\{[^{}]*\}\}")
+_CN_LINK_RE = re.compile(r"\[\[([^\]|]+\|)?([^\]]+)\]\]")
+
+
+def _clean_cn_context(text: str) -> str:
+    """Strip wiki markup from a claim context snippet (best effort)."""
+    text = re.sub(r"<ref[^>/]*>.*?</ref>", "", text, flags=re.S | re.I)
+    text = re.sub(r"<ref[^>]*/?>", "", text, flags=re.I)
+    for _ in range(3):
+        text = _CN_TMPL_RE.sub("", text)
+    text = re.sub(r"\{\{[^{}]*$", "", text)  # template cut off mid-snippet
+    text = re.sub(r"^[^{}]*\}\}", "", text)  # orphaned template close
+    text = _CN_LINK_RE.sub(r"\2", text)
+    text = text.replace("'''", "").replace("''", "")
+    text = re.sub(r"==[^=\n]+==", "", text)  # section headers
+    text = re.sub(r"\s+", " ", text).strip(" \n\t.,;:")
+    return text
+
+
+def _cn_claim_sentence(wikitext: str, match: re.Match) -> tuple:
+    """Extract the tagged sentence and the tag's date (if any)."""
+    params = match.group(2) or ""
+    date = ""
+    dm = re.search(r"date\s*=\s*([^|}]+)", params, re.I)
+    if dm:
+        date = dm.group(1).strip()
+    # Walk back to the start of the sentence/paragraph, forward to its end.
+    start = match.start()
+    for boundary in ("\n\n", "\n", ". ", "; ", ": "):
+        idx = wikitext.rfind(boundary, 0, start)
+        if idx != -1:
+            start = idx + len(boundary)
+            break
+    end = match.end()
+    mend = re.search(r"[.!?](?=\s|$)", wikitext[end:])
+    if mend:
+        end = end + mend.end()
+    else:
+        end = min(len(wikitext), end + 80)
+    return _clean_cn_context(wikitext[start:end]), date
+
+
+def citation_needed(topic: str = "", article: str = "",
+                    limit: int = 10, lang: str = "en") -> str:
+    """Find statements Wikipedia has flagged as needing a source.
+
+    Two angles on the same problem. With ``article`` set, it reads that
+    article's wikitext (read-only parse API) and extracts every sentence
+    carrying a {{citation needed}} (or {{cn}}/{{fact}}) tag — the exact
+    claims editors have flagged as unsourced. With ``topic`` (or neither),
+    it searches Wikipedia for articles containing "citation needed" tags
+    on that topic via the read-only ``insource:`` search, returning each
+    article plus the flagged claim's snippet. Use it to find sourcing work
+    as an editor, or to spot the shakiest claims in a topic you're
+    researching. Tag-name matching is English-Wikipedia-centric
+    (other languages rename the template); ``lang`` is accepted for API
+    consistency. Read-only — GET only, no new dependencies.
+    """
+    try:
+        limit = max(1, min(int(limit), 25))
+    except (TypeError, ValueError):
+        limit = 10
+    api = _wiki(lang)
+    base = api.replace("/w/api.php", "")
+
+    # --- Angle 1: a single article — extract its tagged claims precisely.
+    article = str(article or "").strip()
+    if article:
+        try:
+            resp = _get(api, params={
+                "action": "parse", "page": article, "prop": "wikitext",
+                "redirects": "1", "format": "json", "origin": "*",
+            })
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception:
+            return f"Could not fetch '{article}' from Wikipedia."
+        if "error" in data:
+            return (f"Could not scan '{article}': "
+                    f"{data['error'].get('info', 'API error')}")
+        page = data.get("parse", {})
+        title = page.get("title", article)
+        wt = (page.get("wikitext") or {}).get("*", "")
+        matches = list(_CN_TAG_RE.finditer(wt))
+        if not matches:
+            return (f"**{title}** — no \"citation needed\" tags found. "
+                    "Every claim currently carries a source (or nobody has "
+                    "challenged one yet).")
+        link = f"[{title}]({base}/wiki/{_slug(title)})"
+        plural = "claim" if len(matches) == 1 else "claims"
+        out = f"{link} — **{len(matches)} unsourced {plural}**\n\n"
+        for i, m in enumerate(matches[:limit], 1):
+            claim, date = _cn_claim_sentence(wt, m)
+            claim = claim if len(claim) <= 280 else claim[:277] + "\u2026"
+            dated = f" (tagged {date})" if date else ""
+            out += f'{i}. _"{claim}"_{dated}\n'
+        if len(matches) > limit:
+            out += f"\n_Showing {limit} of {len(matches)} tagged claims._\n"
+        return out
+
+    # --- Angle 2: topic (or broad) search for tagged articles.
+    topic = str(topic or "").strip()
+    srsearch = 'insource:"citation needed"'
+    if topic:
+        srsearch += f" {topic}"
+    try:
+        resp = _get(api, params={
+            "action": "query", "list": "search", "srsearch": srsearch,
+            "srnamespace": "0", "srlimit": str(limit),
+            "srprop": "snippet", "format": "json", "origin": "*",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return "Could not search Wikipedia for unsourced claims."
+    if "error" in data:
+        return f"Could not search: {data['error'].get('info', 'API error')}"
+    results = (data.get("query") or {}).get("search", [])
+    if not results:
+        hint = f' on "{topic}"' if topic else ""
+        return (f'No articles with "citation needed" tags found{hint} — try a '
+                "broader topic, or drop the topic for a Wikipedia-wide sample.")
+    scope = f' on "{topic}"' if topic else " across Wikipedia"
+    out = (f"**Unsourced claims{scope}** — articles flagged with "
+           "citation-needed tags\n\n")
+    for i, r in enumerate(results, 1):
+        title = r.get("title", "?")
+        link = f"[{title}]({base}/wiki/{_slug(title)})"
+        snippet = re.sub(r"<[^>]+>", "", r.get("snippet") or "")
+        snippet = _clean_cn_context(unescape(re.sub(r"\s+", " ", snippet)))
+        snippet = snippet if len(snippet) <= 280 else snippet[:277] + "…"
+        snippet = snippet if len(snippet) <= 280 else snippet[:277] + "\u2026"
+        out += f"{i}. {link}\n"
+        if snippet:
+            out += f'   _"{snippet}"_\n'
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -4241,6 +4387,48 @@ TOOLS = [
             "required": ["user"],
         },
     },
+    {
+        "name": "citation_needed",
+        "description": (
+            "Find statements Wikipedia has flagged as needing a source. "
+            "Two angles: pass `article` to extract every sentence in that "
+            "article carrying a {{citation needed}} tag (the exact claims "
+            "editors flagged, with tag dates), or pass `topic` (or "
+            "neither) to search Wikipedia for articles with unsourced "
+            "claims on that topic, each with the flagged claim's text. "
+            "Use it to find sourcing work as an editor or to spot the "
+            "shakiest claims in a topic you're researching. The "
+            "verification companion to `references`: this finds what's "
+            "missing a source. Tag-name matching is English-centric; "
+            "`lang` accepted for API consistency. Read-only — GET only, "
+            "no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Keyword to scope the search (e.g. 'climate'); omit for a Wikipedia-wide sample",
+                },
+                "article": {
+                    "type": "string",
+                    "description": "Exact article title to scan for tagged claims (takes precedence over topic)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max claims/articles to return (default 10, max 25)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -4323,6 +4511,8 @@ def _call_tool(name: str, args: dict) -> str:
         return disambiguation(**args)
     if name == "user_contribs":
         return user_contribs(**args)
+    if name == "citation_needed":
+        return citation_needed(**args)
     return f"Unknown tool: {name}"
 
 
