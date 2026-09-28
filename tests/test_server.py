@@ -762,10 +762,47 @@ def main() -> int:
     out = server._call_tool("user_contribs", {"user": "Jimbo Wales"})
     check("dispatcher routes to user_contribs", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Latest contributions" in out, out[:200])
+
+    section("citation_needed — article mode")
+    out = server.citation_needed(article="Brain of Albert Einstein", limit=5)
+    check("header names article", "[Brain of Albert Einstein](https://en.wikipedia.org/wiki/Brain_of_Albert_Einstein)" in out, out[:200])
+    check("counts tagged claims", "unsourced claim" in out, out[:200])
+    check("extracts the flagged sentence", "Publication bias" in out, out[:600])
+    check("shows tag date", "tagged July 2023" in out, out[:800])
+    check("no raw wikitext leaks", "{{" not in out and "[[" not in out, out[:800])
+
+    section("citation_needed — article without tags")
+    out = server.citation_needed(article="Albert Einstein")
+    check("no-tag article reported", 'no "citation needed" tags found' in out, out[:200])
+
+    section("citation_needed — missing article")
+    out = server.citation_needed(article="This Article Does Not Exist ZZZ")
+    check("missing article reported", "doesn't exist" in out, out[:200])
+
+    section("citation_needed — topic mode")
+    out = server.citation_needed(topic="climate", limit=3)
+    check("topic header", 'Unsourced claims on "climate"' in out, out[:200])
+    numbered = sum(1 for i in range(1, 11) if f"\n{i}. " in out)
+    check("limit respected", 1 <= numbered <= 3, f"got {numbered} entries")
+    check("no raw wikitext in snippets", "{{" not in out and "[[" not in out, out[:1200])
+
+    section("citation_needed — clamping + precedence")
+    out = server.citation_needed(topic="climate", article="Brain of Albert Einstein", limit=1)
+    check("article wins over topic", "Brain of Albert Einstein" in out and 'on "climate"' not in out, out[:300])
+    out = server.citation_needed(topic="climate", limit=500)
+    numbered = sum(1 for i in range(1, 60) if f"\n{i}. " in out)
+    check("limit clamps to 25", numbered <= 25, f"got {numbered} entries")
+    out = server.citation_needed(topic="climate", limit="abc")
+    check("non-int limit returns results (no crash)", "Unsourced claims" in out, out[:200])
+
+    section("citation_needed — dispatcher routing")
+    out = server._call_tool("citation_needed", {"article": "Brain of Albert Einstein"})
+    check("dispatcher routes to citation_needed", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "unsourced claim" in out, out[:300])
     section("tool registry")
-    check("all 39 tools listed", len(server.TOOLS) == 39)
+    check("all 40 tools listed", len(server.TOOLS) == 40)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
