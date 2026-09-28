@@ -53,9 +53,11 @@ All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `
 
 ## Setup
 
-### 1. Register with mcporter
+This is a standard MCP server — it works with any MCP client (Claude Code, Cursor, Windsurf, etc.).
 
-Add to your `~/.openclaw/workspace/config/mcporter.json`:
+### Any MCP client
+
+Add to your client's MCP config (e.g. `~/.claude.json`, or Cursor's `mcp.json`):
 
 ```json
 {
@@ -68,7 +70,11 @@ Add to your `~/.openclaw/workspace/config/mcporter.json`:
 }
 ```
 
-### 2. Restart mcporter
+Then restart your client (or reload its MCP servers) to pick it up.
+
+### OpenClaw (via mcporter)
+
+Add the same `mcpServers` block to `~/.openclaw/workspace/config/mcporter.json`, then restart the gateway:
 
 ```bash
 openclaw gateway restart
