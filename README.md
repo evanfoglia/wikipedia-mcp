@@ -48,6 +48,7 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 | `disambiguation` | Resolve a disambiguation page into its candidate articles — title + one-line description, grouped by section; pick the right one, then fetch it |
 | `user_contribs` | What a Wikipedia editor has been doing — latest contributions by a username or IP (timestamp, byte delta, edit comment, new-page/minor/current flags), with registration date + total edit count; profile contributors or audit anonymous IPs |
 | `citation_needed` | Find statements Wikipedia has flagged as needing a source — pass `article` to extract its tagged claims (with tag dates), or `topic` for articles with unsourced claims on a topic; the verification companion to `references` |
+| `talk` | Read an article's talk page — the most recently active editor discussion threads, each with heading, last-activity timestamp, signed-comment count, and an excerpt of the latest comment; automated notices filtered out — the behind-the-scenes companion to `contributors` and `article_quality` |
 
 All tools accept an optional `lang` parameter (one of: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang` — and `simple_summary`, which always reads Simple English Wikipedia. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 

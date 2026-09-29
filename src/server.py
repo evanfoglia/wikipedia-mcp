@@ -21,7 +21,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.29"
+SERVER_VERSION = "1.1.30"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -3188,6 +3188,173 @@ def citation_needed(topic: str = "", article: str = "",
 
 
 # ---------------------------------------------------------------------------
+# talk — active discussion threads on an article's talk page
+# ---------------------------------------------------------------------------
+_TALK_SIG_RE = re.compile(r"(\d{1,2}:\d{2}, \d{1,2} \w+ \d{4}) \(UTC\)")
+_TALK_SECTION_RE = re.compile(r"(?m)^==\s*(.+?)\s*==\s*$")
+# Automated maintenance notices (redirect/deletion discussions) — not real threads
+_TALK_NOISE_RES = (
+    re.compile(r"<!--\s*Template:(RFDNote|Rfd|Afd|Cfd|Prod)", re.I),
+    re.compile(r"\{\{\s*subst\s*:\s*(Rfd notice|Afd|Cfd|Prod)", re.I),
+    re.compile(
+        r"listed at \[\[Wikipedia:(Redirects for discussion|Articles for deletion"
+        r"|Categories for discussion)",
+        re.I,
+    ),
+)
+# Closed-thread banners whose inner text (incl. the closing admin's signature)
+# is not part of the discussion — strip before extracting timestamps.
+_TALK_STRIP_TEMPLATES = ("archivetop", "archive top", "archivebottom", "archive bottom")
+
+
+def _strip_talk_banners(body: str) -> str:
+    """Remove closed-thread banner templates (archivetop etc.) from a section."""
+    out, i, n = [], 0, len(body)
+    while i < n:
+        j = body.find("{{", i)
+        if j == -1:
+            out.append(body[i:])
+            break
+        name, _b, end = _extract_template(body, j)
+        if name and name.lower().strip() in _TALK_STRIP_TEMPLATES:
+            out.append(body[i:j])
+            i = end
+        else:
+            out.append(body[i:j + 2])
+            i = j + 2
+    return "".join(out)
+
+
+def _parse_talk_ts(ts: str):
+    """Parse a Wikipedia signature timestamp; None when unparseable."""
+    try:
+        return datetime.strptime(ts, "%H:%M, %d %B %Y")
+    except ValueError:
+        return None
+
+
+def _clean_talk_comment(text: str) -> str:
+    """Collapse talk-page wikitext into readable plain text (best effort)."""
+    text = re.sub(r"<ref[^>/]*>.*?</ref\s*>", "", text, flags=re.S | re.I)
+    text = re.sub(r"<ref[^>]*/\s*>", "", text, flags=re.I)
+    prev = None
+    while prev != text:  # peel nested templates inside-out
+        prev = text
+        text = re.sub(r"\{\{[^{}]*\}\}", "", text)
+    text = re.sub(r"<[^>]+>", "", text)  # signatures, spans, small tags
+    text = text.replace("'''", "").replace("''", "")
+    text = re.sub(r"\[(?:https?://[^\s\]]+)\s+([^\]]+)\]", r"\1", text)  # [url label]
+    text = re.sub(r"https?://[^\s\]]+", "", text)  # bare urls
+    text = re.sub(r"\[\[[^|\]]*\|([^\]]+)\]\]", r"\1", text)
+    text = re.sub(r"\[\[([^\]]+)\]\]", r"\1", text)
+    lines = [re.sub(r"^[:;*#\s]+", "", ln) for ln in text.splitlines()]
+    return re.sub(r"\s+", " ", "\n".join(lines)).strip(" -,;:")
+
+
+def talk(title: str, limit: int = 5, lang: str = "en") -> str:
+    """Show the most recently active discussion threads on an article's talk page.
+
+    The behind-the-scenes view of an article: what Wikipedia editors are
+    currently debating, questioning, or proposing about the topic. Returns
+    each thread's heading, last-activity timestamp, signed-comment count,
+    and an excerpt of the latest comment — the fastest way to find
+    controversies, open questions, and editorial disputes. Automated
+    maintenance notices (redirect/deletion discussions) are filtered out;
+    threads are ranked by recency. The discussion companion to
+    `contributors` (who edits) and `article_quality` (how the article is
+    graded): check all three for a full "can I rely on this article?" audit.
+
+    Reads the Talk: page wikitext via the read-only MediaWiki API — GET
+    only, no new dependencies. `limit` clamps the number of threads
+    (default 5, max 15). Talk-page conventions are English-centric; `lang`
+    is accepted for API consistency.
+    """
+    try:
+        limit = max(1, min(int(limit), 15))
+    except (TypeError, ValueError):
+        limit = 5
+    params = {
+        "action": "query",
+        "prop": "revisions",
+        "rvprop": "content",
+        "rvslots": "main",
+        "rvlimit": 1,
+        "titles": f"Talk:{title}",
+        "redirects": 1,
+        "format": "json",
+        "formatversion": "2",
+    }
+    resp = _get(_wiki(lang), params=params)
+    resp.raise_for_status()
+    data = resp.json()
+    pages = data.get("query", {}).get("pages", [])
+    if not pages:
+        return f"No talk page found for '{title}'."
+    page = pages[0]
+    if page.get("missing") or page.get("invalid"):
+        return (
+            f"No talk page for '{title}' yet on {lang}.wikipedia.org — no "
+            "editor discussion exists. Check the spelling, or try `summary` "
+            "to confirm the article itself exists."
+        )
+    talk_title = page.get("title", f"Talk:{title}")
+    article_title = talk_title.split(":", 1)[1] if ":" in talk_title else talk_title
+    revs = page.get("revisions") or []
+    wikitext = revs[0].get("slots", {}).get("main", {}).get("content", "") if revs else ""
+
+    parts = _TALK_SECTION_RE.split(wikitext)
+    threads = []
+    for i in range(1, len(parts), 2):
+        heading = _clean_talk_comment(parts[i])[:120]
+        body = _strip_talk_banners(parts[i + 1])
+        if any(rx.search(body) for rx in _TALK_NOISE_RES):
+            continue  # automated redirect/deletion notice, not discussion
+        sigs = _TALK_SIG_RE.findall(body)
+        if not sigs:
+            continue
+        parsed = [(d, s) for s in sigs for d in [_parse_talk_ts(s)] if d]
+        if not parsed:
+            continue
+        last_dt, last_str = max(parsed)
+        # Latest comment = text between the last two signatures.
+        matches = list(_TALK_SIG_RE.finditer(body))
+        seg_start = matches[-2].end() if len(matches) > 1 else 0
+        excerpt = _clean_talk_comment(body[seg_start:matches[-1].start()])
+        if len(excerpt) < 40:  # latest comment too thin — widen the window
+            excerpt = _clean_talk_comment(body[max(0, matches[-1].start() - 700):matches[-1].start()])
+        if len(excerpt) > 450:
+            excerpt = excerpt[:447] + "…"
+        threads.append(
+            {
+                "heading": heading or "(untitled thread)",
+                "last": last_dt,
+                "last_str": last_str,
+                "replies": len(sigs),
+                "excerpt": excerpt,
+            }
+        )
+    threads.sort(key=lambda t: t["last"], reverse=True)
+    threads = threads[:limit]
+    if not threads:
+        return (
+            f'No signed discussion threads on "Talk:{article_title}" — the talk '
+            "page exists but holds no dated editor comments (it may contain "
+            "only templates, archive boxes, or bot notices)."
+        )
+    talk_url = f"https://{lang}.wikipedia.org/wiki/{_url_quote(_slug(talk_title), safe=':/')}"
+    out = (
+        f'**Talk: "{article_title}"** — {len(threads)} most recently active '
+        f"discussion thread(s) ([full talk page]({talk_url}))\n\n"
+    )
+    for i, t in enumerate(threads, 1):
+        out += f"{i}. **{t['heading']}**\n"
+        out += f"   Last activity {t['last_str']} (UTC) · {t['replies']} signed comment(s)\n"
+        if t["excerpt"]:
+            out += f"   _\"{t['excerpt']}\"_\n"
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -4429,6 +4596,42 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "talk",
+        "description": (
+            "Show the most recently active discussion threads on an article's "
+            "talk page — what Wikipedia editors are currently debating, "
+            "questioning, or proposing about the topic. Each thread lists its "
+            "heading, last-activity timestamp, signed-comment count, and an "
+            "excerpt of the latest comment. Automated maintenance notices "
+            "(redirect/deletion discussions) are filtered out. The "
+            "behind-the-scenes companion to `contributors` and "
+            "`article_quality`: check it to find controversies, open "
+            "questions, and editorial disputes before relying on an article. "
+            "Read-only — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title whose talk page to read (e.g. 'Climate change')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max threads to return (default 5, max 15)",
+                    "default": 5,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -4513,6 +4716,8 @@ def _call_tool(name: str, args: dict) -> str:
         return user_contribs(**args)
     if name == "citation_needed":
         return citation_needed(**args)
+    if name == "talk":
+        return talk(**args)
     return f"Unknown tool: {name}"
 
 

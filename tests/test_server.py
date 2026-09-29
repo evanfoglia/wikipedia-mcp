@@ -799,10 +799,50 @@ def main() -> int:
     out = server._call_tool("citation_needed", {"article": "Brain of Albert Einstein"})
     check("dispatcher routes to citation_needed", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "unsourced claim" in out, out[:300])
+    section("talk — active discussion threads")
+    out = server.talk("Climate change", limit=3)
+    check("header names talk page", '**Talk: "Climate change"**' in out, out[:200])
+    check("threads listed", "\n1. " in out and "Last activity" in out, out[:400])
+    check("signed-comment counts shown", "signed comment(s)" in out, out[:600])
+    check("no raw wikitext leaks", "{{" not in out and "[[" not in out, out[:1200])
+
+    section("talk — bot notices filtered")
+    out = server.talk("Eiffel Tower", limit=10)
+    check("redirect-discussion notices excluded", "Redirects for discussion" not in out, out[:800])
+    check("real threads kept", "German name" in out, out[:800])
+
+    section("talk — missing talk page")
+    out = server.talk("ThisArticleDoesNotExistZZZ123")
+    check("missing page reported", "No talk page for" in out, out[:200])
+
+    section("talk — clamping + type safety")
+    out = server.talk("Climate change", limit=500)
+    numbered = sum(1 for i in range(1, 60) if f"\n{i}. " in out)
+    check("limit clamps to 15", numbered <= 15, f"got {numbered} entries")
+    out = server.talk("Climate change", limit="abc")
+    check("non-int limit returns results (no crash)", "**Talk:" in out, out[:200])
+
+    section("talk — helpers")
+    check(
+        "_clean_talk_comment strips markup",
+        server._clean_talk_comment("Why '''bold''' [[Eifel|Eifel region]]? [https://x.example a link]") == "Why bold Eifel region? a link",
+    )
+    check("_parse_talk_ts parses", server._parse_talk_ts("15:53, 10 August 2026") is not None)
+    check("_parse_talk_ts rejects junk", server._parse_talk_ts("not a date") is None)
+    check(
+        "_strip_talk_banners removes archivetop",
+        "{{archivetop" not in server._strip_talk_banners("{{archivetop|1=x}} real text"),
+    )
+
+    section("talk — dispatcher routing")
+    out = server._call_tool("talk", {"title": "Eiffel Tower"})
+    check("dispatcher routes to talk", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "**Talk:" in out, out[:200])
+
     section("tool registry")
-    check("all 40 tools listed", len(server.TOOLS) == 40)
+    check("all 41 tools listed", len(server.TOOLS) == 41)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1575,6 +1615,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Mercury"})
         elif name == "user_contribs":
             out = server._call_tool(name, {"user": "Jimbo Wales", "limit": 2})
+        elif name == "talk":
+            out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "simple_summary":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
