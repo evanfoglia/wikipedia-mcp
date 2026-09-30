@@ -4,6 +4,10 @@ A Model Context Protocol (MCP) server that provides access to Wikipedia via the 
 
 ⭐ If you find this useful, please star the repo — it helps others discover it.
 
+## Contributing
+
+Contributions are welcome — new tools especially. See [CONTRIBUTING.md](CONTRIBUTING.md) for the how-to: one file, one tool per PR, smoke tests included.
+
 ## Tools
 
 | Tool | Description |
