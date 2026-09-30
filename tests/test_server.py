@@ -839,10 +839,83 @@ def main() -> int:
     check("dispatcher routes to talk", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "**Talk:" in out, out[:200])
 
+    section("article_flags — maintenance banners")
+    out = server.article_flags("List of unsolved deaths", limit=10)
+    check("header names article", "**List of unsolved deaths**" in out or "[List of unsolved deaths]" in out, out[:200])
+    check("original research found", "Original research" in out, out[:600])
+    check("fringe theories found", "Fringe theories" in out, out[:600])
+    check("tag dates shown", "March 2023" in out and "August 2015" in out, out[:600])
+    check("plain-language meaning shown", "unverified analysis" in out, out[:800])
+
+    section("article_flags — clean article")
+    out = server.article_flags("Eiffel Tower")
+    check("no flags reported", "no editorial flags" in out, out[:200])
+
+    section("article_flags — missing article")
+    out = server.article_flags("ThisArticleDoesNotExistZZZ123")
+    check("missing reported", "Could not check" in out, out[:200])
+
+    section("article_flags — empty article")
+    out = server.article_flags("")
+    check("empty title reported", "title is required" in out, out[:200])
+
+    section("article_flags — clamping + type safety")
+    out = server.article_flags("List of unsolved deaths", limit=500)
+    numbered = sum(1 for i in range(1, 60) if f"\n{i}. " in out)
+    check("limit clamps to 25", numbered <= 25, f"got {numbered} entries")
+    out = server.article_flags("List of unsolved deaths", limit="abc")
+    check("non-int limit returns results (no crash)", "editorial flag" in out, out[:200])
+
+    section("article_flags — helpers")
+    check(
+        "_af_banner matches POV",
+        server._af_banner("POV")[0] == "POV",
+    )
+    check(
+        "_af_banner strips section suffix",
+        server._af_banner("POV section")[0] == "POV",
+    )
+    check(
+        "_af_banner rejects cite templates",
+        server._af_banner("Cite web") == ("", ""),
+    )
+    check(
+        "_af_banner rejects multiple issues wrapper",
+        server._af_banner("Multiple issues") == ("", ""),
+    )
+    wt = (
+        "{{Short description|None}}\n{{Multiple issues|\n"
+        "{{original research|date=March 2023}}\n"
+        "{{Fringe theories|date=August 2015}}\n}}\n"
+        "== Reception ==\n{{POV section|date=January 2024}}\ntext"
+    )
+    flags = server._extract_article_flags(wt)
+    check(
+        "multiple issues unpacked into sub-flags",
+        ("Original research", "March 2023", "article top") in flags
+        and ("Fringe theories", "August 2015", "article top") in flags,
+        str(flags),
+    )
+    check(
+        "section-scoped banner attributed",
+        ("POV", "January 2024", "Reception") in flags,
+        str(flags),
+    )
+    check(
+        "wrapper not reported as own flag",
+        all("Multiple issues" not in f[0] for f in flags),
+        str(flags),
+    )
+
+    section("article_flags — dispatcher routing")
+    out = server._call_tool("article_flags", {"article": "Eiffel Tower"})
+    check("dispatcher routes to article_flags", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "editorial flags" in out, out[:200])
+
     section("tool registry")
-    check("all 41 tools listed", len(server.TOOLS) == 41)
+    check("all 42 tools listed", len(server.TOOLS) == 42)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1617,6 +1690,8 @@ def main() -> int:
             out = server._call_tool(name, {"user": "Jimbo Wales", "limit": 2})
         elif name == "talk":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "article_flags":
+            out = server._call_tool(name, {"article": "Eiffel Tower"})
         elif name == "simple_summary":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
