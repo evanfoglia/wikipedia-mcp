@@ -21,7 +21,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.30"
+SERVER_VERSION = "1.1.31"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -3355,6 +3355,196 @@ def talk(title: str, limit: int = 5, lang: str = "en") -> str:
 
 
 # ---------------------------------------------------------------------------
+# article_flags — maintenance banners editors placed on an article
+# ---------------------------------------------------------------------------
+# English maintenance template names (lowercased, singular canonical key)
+# → (display name, plain-language meaning). Deliberately curated: only real
+# editorial banners, so infobox/citation/formatting templates never leak in.
+_AF_BANNERS = {
+    "original research": ("Original research", "Contains original research — unverified analysis may be mixed in with facts"),
+    "or": ("Original research", "Contains original research — unverified analysis may be mixed in with facts"),
+    "pov": ("POV", "Neutral point of view is disputed — editors disagree the article presents a balanced view"),
+    "npov": ("POV", "Neutral point of view is disputed — editors disagree the article presents a balanced view"),
+    "neutrality": ("POV", "Neutral point of view is disputed — editors disagree the article presents a balanced view"),
+    "unreferenced": ("Unreferenced", "No sources cited at all"),
+    "refimprove": ("More citations needed", "Needs more citations to reliable sources"),
+    "more citations needed": ("More citations needed", "Needs more citations to reliable sources"),
+    "citations broken": ("Broken citations", "Some citation links are broken"),
+    "cleanup": ("Cleanup needed", "Style, wording, or structural problems"),
+    "weasel": ("Weasel words", "Vague claims not attributed to any source"),
+    "weasel words": ("Weasel words", "Vague claims not attributed to any source"),
+    "peacock": ("Peacock terms", "Self-promotional wording"),
+    "tone": ("Tone", "Not written in an encyclopedic tone"),
+    "advert": ("Advertisement-like", "Reads like an advertisement"),
+    "advertisement": ("Advertisement-like", "Reads like an advertisement"),
+    "coi": ("Conflict of interest", "A close connection to the subject is suspected"),
+    "connected contributor": ("Conflict of interest", "A close connection to the subject is suspected"),
+    "autobiography": ("Autobiographical", "May be written by or about the subject themselves"),
+    "fringe theories": ("Fringe theories", "Covers fringe theories outside mainstream consensus"),
+    "fringe": ("Fringe theories", "Covers fringe theories outside mainstream consensus"),
+    "disputed": ("Disputed", "Factual accuracy is disputed"),
+    "accuracy": ("Disputed", "Factual accuracy is disputed"),
+    "accuracy dispute": ("Disputed", "Factual accuracy is disputed"),
+    "contradict": ("Self-contradictory", "Statements in the article conflict with each other"),
+    "self-contradictory": ("Self-contradictory", "Statements in the article conflict with each other"),
+    "outdated": ("Outdated", "Facts or statements may no longer be current"),
+    "update": ("Outdated", "Facts or statements may no longer be current"),
+    "current": ("Outdated", "Facts or statements may no longer be current"),
+    "out of date": ("Outdated", "Facts or statements may no longer be current"),
+    "expand": ("Needs expansion", "Coverage is thin"),
+    "notability": ("Notability questioned", "May not meet Wikipedia's inclusion criteria"),
+    "orphan": ("Orphan", "Few or no other articles link to it"),
+    "lead too long": ("Lead too long", "The lead section is too long"),
+    "lead missing": ("Lead missing", "The lead section is missing"),
+    "lead too short": ("Lead too short", "The lead section is too short"),
+    "unbalanced": ("Unbalanced", "Gives undue weight to some viewpoints"),
+    "unbalanced opinion": ("Unbalanced", "Gives undue weight to some viewpoints"),
+    "globalize": ("Needs worldwide view", "Needs a worldwide perspective"),
+    "worldwide view": ("Needs worldwide view", "Needs a worldwide perspective"),
+    "rewrite": ("Needs rewrite", "The article needs to be rewritten"),
+    "copy edit": ("Needs copy edit", "Grammar, style, or clarity problems"),
+    "technical": ("Too technical", "Too technical for general readers"),
+    "too technical": ("Too technical", "Too technical for general readers"),
+    "fanpov": ("Fan POV", "Written from a fan's point of view"),
+    "in-universe": ("In-universe", "Written from an in-universe (fan) perspective"),
+    "recentism": ("Recentism", "Skewed toward recent events"),
+    "unreliable sources": ("Unreliable sources", "Cites unreliable sources"),
+    "primary sources": ("Primary sources", "Relies too heavily on primary sources"),
+    "one source": ("Single source", "Relies on a single source"),
+    "third-party": ("Needs independent sources", "Needs independent (third-party) sources"),
+    "third party": ("Needs independent sources", "Needs independent (third-party) sources"),
+    "self-published": ("Self-published sources", "Cites self-published sources"),
+    "hoax": ("Possible hoax", "Authenticity is questioned"),
+    "blp sources": ("BLP sourcing", "Biography of a living person has sourcing problems"),
+    "blp unsourced": ("BLP sourcing", "Biography of a living person has sourcing problems"),
+    "external links": ("External links", "External links may not comply with policy"),
+    "overquote": ("Overquoting", "Overuses quotations"),
+    "trivia": ("Excessive trivia", "Excessive trivia"),
+    "in popular culture": ("Excessive pop culture", "Excessive pop-culture references"),
+    "split": ("Split proposed", "A split into multiple articles is proposed"),
+    "merge": ("Merge proposed", "A merge with another article is proposed"),
+    "merge to": ("Merge proposed", "A merge with another article is proposed"),
+    "merge from": ("Merge proposed", "A merge with another article is proposed"),
+    "copyvio": ("Possible copyright violation", "Possible copyright violation"),
+    "linkrot": ("Link rot", "External links need archiving"),
+    "dead end": ("Dead end", "Has no links to other Wikipedia articles"),
+    "deadend": ("Dead end", "Has no links to other Wikipedia articles"),
+    "more footnotes": ("More footnotes needed", "Needs more inline citations (footnotes)"),
+    "no footnotes": ("No footnotes", "Has no inline citations (footnotes)"),
+}
+
+_AF_TMPL_RE = re.compile(r"\{\{\s*([A-Za-z][A-Za-z0-9_\-. ]*?)\s*(?=[|}])")
+_AF_DATE_RE = re.compile(r"\|\s*date\s*=\s*([^|}]+)")
+_AF_SECTION_RE = re.compile(r"(?m)^={2,}\s*(.+?)\s*={2,}\s*$")
+_AF_LINK_RE = re.compile(r"\[\[([^\]|]+\|)?([^\]]+)\]\]")
+
+
+def _af_banner(raw: str) -> tuple:
+    """Map a template name to (display, meaning); ('','') if not a banner."""
+    name = re.sub(r"\s+", " ", raw.strip().lower())
+    if name in _AF_BANNERS:
+        return _AF_BANNERS[name]
+    # Section-scoped variants: "POV section", "original research section".
+    if name.endswith(" section"):
+        base = name[: -len(" section")]
+        if base in _AF_BANNERS:
+            return _AF_BANNERS[base]
+    return ("", "")
+
+
+def _extract_article_flags(wikitext: str) -> list:
+    """Scan wikitext for maintenance banners → [(display, date, section)]."""
+    headings = [(m.start(), m.group(1).strip().strip("=").strip())
+                for m in _AF_SECTION_RE.finditer(wikitext)]
+    flags, seen = [], set()
+    for m in _AF_TMPL_RE.finditer(wikitext):
+        display, _ = _af_banner(m.group(1))
+        if not display:
+            continue
+        section = "article top"
+        for hpos, hname in reversed(headings):
+            if hpos < m.start():
+                section = _AF_LINK_RE.sub(r"\2", hname).strip()
+                break
+        dm = _AF_DATE_RE.search(wikitext[m.start():m.start() + 300])
+        date = dm.group(1).strip() if dm else ""
+        key = (display, date, section)
+        if key not in seen:
+            seen.add(key)
+            flags.append((display, date, section))
+    return flags
+
+
+def article_flags(article: str = "", limit: int = 10, lang: str = "en") -> str:
+    """Show the maintenance banners editors placed on an article.
+
+    Wikipedia's own warning labels — the {{POV}}, {{Original research}},
+    {{Unreferenced}}, {{Cleanup}}, {{Disputed}} ... templates editors stick
+    at the top of an article or section when something is wrong with it.
+    Reads the article's wikitext via the read-only parse API, matches banner
+    templates against a curated English maintenance-template list, and
+    returns each flag with its tag date, location (article top or section),
+    and a plain-language meaning. The {{Multiple issues}} wrapper is
+    unpacked into its individual flags. The trust-signal companion to
+    `article_quality` (the grade), `citation_needed` (unsourced claims), and
+    `talk` (editor discussion): check it to see exactly what editors think
+    is wrong with an article before relying on it. Banner names are
+    English-Wikipedia-centric (`lang` accepted for API consistency).
+    Read-only — GET only, no new dependencies.
+    """
+    try:
+        limit = max(1, min(int(limit), 25))
+    except (TypeError, ValueError):
+        limit = 10
+    article = str(article or "").strip()
+    if not article:
+        return "An article title is required."
+    api = _wiki(lang)
+    base = api.replace("/w/api.php", "")
+    try:
+        resp = _get(api, params={
+            "action": "parse", "page": article, "prop": "wikitext",
+            "redirects": "1", "format": "json", "origin": "*",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return f"Could not fetch '{article}' from Wikipedia."
+    if "error" in data:
+        return (f"Could not check '{article}': "
+                f"{data['error'].get('info', 'API error')}")
+    page = data.get("parse", {})
+    title = page.get("title", article)
+    wt = (page.get("wikitext") or {}).get("*", "")
+    flags = _extract_article_flags(wt)
+    link = f"[{title}]({base}/wiki/{_slug(title)})"
+    if not flags:
+        return (
+            f"**{title}** — no editorial flags. Editors haven't placed any "
+            "maintenance banners (neutrality, sourcing, accuracy, cleanup) "
+            "on this article."
+        )
+    plural = "flag" if len(flags) == 1 else "flags"
+    out = (f"{link} — **{len(flags)} editorial {plural}** (maintenance "
+           "banners placed by editors)\n\n")
+    meanings = {d: m for d, m in _AF_BANNERS.values()}
+    for i, (display, date, section) in enumerate(flags[:limit], 1):
+        dated = f" (tagged {date})" if date else ""
+        where = "" if section == "article top" else f" — section: {section}"
+        out += f"{i}. **{display}**{dated}{where}\n"
+        out += f"   _{meanings.get(display, '')}_\n"
+    if len(flags) > limit:
+        out += f"\n_Showing {limit} of {len(flags)} flags._\n"
+    out += (
+        "\n_Flags are Wikipedia's own editorial banners. Pair with "
+        "`article_quality` (the grade), `citation_needed` (unsourced claims), "
+        "and `talk` (editor discussion) for a full \"can I rely on this "
+        "article?\" audit._"
+    )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -4632,6 +4822,41 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "article_flags",
+        "description": (
+            "Show the maintenance banners editors placed on an article — "
+            "Wikipedia's own warning labels ({{POV}}, {{Original research}}, "
+            "{{Unreferenced}}, {{Cleanup}}, {{Disputed}}, ...). Each flag "
+            "lists its banner name, tag date, location (article top or "
+            "section), and a plain-language meaning. The trust-signal "
+            "companion to `article_quality` (the grade), `citation_needed` "
+            "(unsourced claims), and `talk` (editor discussion): check it to "
+            "see exactly what editors think is wrong with an article before "
+            "relying on it. Read-only — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "article": {
+                    "type": "string",
+                    "description": "Article title to check for editorial flags (e.g. 'Climate change')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max flags to return (default 10, max 25)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -4718,6 +4943,8 @@ def _call_tool(name: str, args: dict) -> str:
         return citation_needed(**args)
     if name == "talk":
         return talk(**args)
+    if name == "article_flags":
+        return article_flags(**args)
     return f"Unknown tool: {name}"
 
 
