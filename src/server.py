@@ -21,7 +21,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.31"
+SERVER_VERSION = "1.1.32"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -3545,6 +3545,139 @@ def article_flags(article: str = "", limit: int = 10, lang: str = "en") -> str:
 
 
 # ---------------------------------------------------------------------------
+# article_protection — is this article locked, and for how long?
+# ---------------------------------------------------------------------------
+_AP_LEVEL_MEANINGS = {
+    "autoconfirmed": "autoconfirmed accounts only (at least 4 days old with "
+                     "10+ edits) — anonymous and brand-new accounts are blocked",
+    "extendedconfirmed": "extended-confirmed accounts only (at least 30 days "
+                         "old with 500+ edits)",
+    "templateeditor": "template editors and administrators only",
+    "sysop": "administrators only",
+    "user": "registered users only",
+}
+
+_AP_TYPE_LABELS = {
+    "edit": "editing",
+    "move": "moving/renaming",
+    "create": "creating",
+    "upload": "uploading files over",
+}
+
+
+def _ap_expiry(expiry):
+    """Human-readable expiry for a protection entry."""
+    if not expiry or expiry == "infinity":
+        return "indefinite"
+    try:
+        date = expiry.split("T")[0]
+        parts = date.split("-")
+        if len(parts) == 3:
+            return f"until {date}"
+    except Exception:
+        pass
+    return f"until {expiry}"
+
+
+def article_protection(article: str = "", lang: str = "en") -> str:
+    """Is this Wikipedia article locked, who can still touch it, and for how long.
+
+    Reports the page's protection status via the read-only action API
+    (prop=info, inprop=protection): which actions are restricted (editing,
+    moving/renaming, creating a missing title, uploading), at what level
+    (semi-protection, extended-confirmed, administrators-only), and when each
+    restriction expires. Cascade-protected pages list the protection source
+    instead of repeating every entry. Missing titles are reported too —
+    salted titles carry a "create" protection. Follows redirects and names
+    the redirect chain. The lockdown companion to the other trust signals:
+    `article_quality` (the grade), `article_flags` (editorial warnings),
+    `citation_needed` (unsourced claims), and `talk` (editor discussion).
+    Read-only — GET only, no new dependencies.
+    """
+    article = str(article or "").strip()
+    if not article:
+        return "An article title is required."
+    api = _wiki(lang)
+    base = api.replace("/w/api.php", "")
+    try:
+        resp = _get(api, params={
+            "action": "query", "prop": "info", "inprop": "protection",
+            "titles": article, "redirects": "1", "format": "json",
+            "origin": "*",
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return f"Could not fetch '{article}' from Wikipedia."
+    if "error" in data:
+        return (f"Could not check '{article}': "
+                f"{data['error'].get('info', 'API error')}")
+    query = data.get("query", {})
+    redirs = query.get("redirects", [])
+    page = next(iter(query.get("pages", {}).values()), None)
+    if page is None:
+        return f"Could not check '{article}': unexpected API response."
+    title = page.get("title", article)
+    link = f"[{title}]({base}/wiki/{_slug(title)})"
+    redirect_note = ""
+    if redirs:
+        chain = " → ".join(r["from"] for r in redirs) + " → " + redirs[-1]["to"]
+        redirect_note = f" (via redirect {chain})"
+    protections = page.get("protection", []) or []
+    if "missing" in page:
+        creates = [p for p in protections if p.get("type") == "create"]
+        if not creates:
+            return (f"{link} doesn't exist as an article, and its title is "
+                    "not protected — anyone could create it.")
+        p = creates[0]
+        level = _AP_LEVEL_MEANINGS.get(p.get("level", ""),
+                                       f"level '{p.get('level', '?')}'")
+        return (f"{link} doesn't exist as an article, and its title is "
+                f"**protected from creation**: only {level} can create it "
+                f"({_ap_expiry(p.get('expiry', ''))}).")
+    if not protections:
+        return (f"{link} — **no protection**{redirect_note}. Fully open: "
+                "anyone, including anonymous editors, can edit it.")
+    # Strongest level first per action type; collapse cascade sources.
+    order = {"sysop": 4, "templateeditor": 3, "extendedconfirmed": 2,
+             "autoconfirmed": 1, "user": 1}
+    by_type = {}
+    cascades = []
+    for p in protections:
+        ptype = p.get("type", "")
+        if "source" in p:
+            cascades.append(p["source"])
+            continue
+        level = p.get("level", "")
+        if ptype not in by_type or order.get(level, 0) > order.get(
+                by_type[ptype].get("level", ""), 0):
+            by_type[ptype] = p
+    lines = []
+    for ptype, p in by_type.items():
+        label = _AP_TYPE_LABELS.get(ptype, ptype)
+        level = p.get("level", "")
+        meaning = _AP_LEVEL_MEANINGS.get(level, f"level '{level}'")
+        lines.append(f"- **{label.capitalize()}**: {meaning} "
+                     f"({_ap_expiry(p.get('expiry', ''))})")
+    out = (f"{link} — **protected**{redirect_note} "
+           f"({len(lines)} restriction{'s' if len(lines) != 1 else ''})\n\n"
+           + "\n".join(lines))
+    if cascades:
+        uniq = sorted(set(cascades))
+        shown = ", ".join(f"`{c}`" for c in uniq[:3])
+        more = f" (+{len(uniq) - 3} more)" if len(uniq) > 3 else ""
+        out += (f"\n\n_Also cascade-protected via: {shown}{more} — fully "
+                "locked pages that include this one._")
+    out += (
+        "\n\n_Protection levels are Wikipedia's own lockdown status. Pair with "
+        "`article_quality` (the grade), `article_flags` (editorial warnings), "
+        "`citation_needed` (unsourced claims), and `talk` (editor discussion) "
+        "for a full \"can I rely on this article?\" audit._"
+    )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -4857,6 +4990,39 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "article_protection",
+        "description": (
+            "Is this Wikipedia article locked, who can still touch it, and "
+            "for how long — the page's protection status. Reports which "
+            "actions are restricted (editing, moving/renaming, creating a "
+            "missing title), at what level (semi-protection, "
+            "extended-confirmed, administrators-only), and when each "
+            "restriction expires; cascade protections name their source "
+            "page. Missing titles are reported too (salted titles carry a "
+            "\"create\" protection). Follows redirects. The lockdown "
+            "companion to the other trust signals: `article_quality` (the "
+            "grade), `article_flags` (editorial warnings), `citation_needed` "
+            "(unsourced claims), and `talk` (editor discussion). Read-only — "
+            "GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "article": {
+                    "type": "string",
+                    "description": "Article title to check for protection (e.g. 'Donald Trump')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -4945,6 +5111,8 @@ def _call_tool(name: str, args: dict) -> str:
         return talk(**args)
     if name == "article_flags":
         return article_flags(**args)
+    if name == "article_protection":
+        return article_protection(**args)
     return f"Unknown tool: {name}"
 
 
