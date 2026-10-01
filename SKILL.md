@@ -54,6 +54,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `citation_needed` | Find statements Wikipedia has flagged as needing a source — pass `article` to extract its tagged claims (with tag dates), or `topic` for articles with unsourced claims on a topic; the verification companion to `references` |
 | `talk` | Read an article's talk page — the most recently active editor discussion threads, each with heading, last-activity timestamp, signed-comment count, and an excerpt of the latest comment; automated notices filtered out — the behind-the-scenes companion to `contributors` and `article_quality` |
 | `article_flags` | Show the maintenance banners editors placed on an article — POV, Original research, Unreferenced, Cleanup, Disputed and more, each with tag date, location, and a plain-language meaning; the trust-signal companion to `article_quality`, `citation_needed`, and `talk` |
+| `article_protection` | Is this Wikipedia article locked — which actions are restricted (editing, moving/renaming, creating), at what level (semi-protection, extended-confirmed, administrators-only), and when each restriction expires; follows redirects; the lockdown companion to the other trust signals |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 

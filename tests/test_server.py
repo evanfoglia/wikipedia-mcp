@@ -912,10 +912,44 @@ def main() -> int:
     check("dispatcher routes to article_flags", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "editorial flags" in out, out[:200])
 
+    section("article_protection — extended-confirmed article")
+    out = server.article_protection("Donald Trump")
+    check("protected header", "**protected**" in out, out[:300])
+    check("edit level shown", "extended-confirmed" in out, out[:600])
+    check("move restriction shown", "Moving/renaming" in out, out[:600])
+    check("indefinite expiry shown", "indefinite" in out, out[:600])
+    check("plain-language meaning", "30 days old" in out, out[:600])
+
+    section("article_protection — open article")
+    out = server.article_protection("Oxyomus setosopunctatus")
+    check("no protection reported", "no protection" in out, out[:200])
+
+    section("article_protection — missing article")
+    out = server.article_protection("ThisArticleDoesNotExistZZZ123")
+    check("missing reported", "doesn't exist" in out, out[:200])
+
+    section("article_protection — empty article")
+    out = server.article_protection("")
+    check("empty title reported", "title is required" in out, out[:200])
+
+    section("article_protection — redirect")
+    out = server.article_protection("USA")
+    check("redirect chain named", "USA → United States" in out, out[:200])
+    check("resolved title linked", "[United States]" in out, out[:200])
+
+    section("article_protection — helpers")
+    check("infinity -> indefinite", server._ap_expiry("infinity") == "indefinite")
+    check("timestamp -> date", server._ap_expiry("2027-03-01T00:00:00Z") == "until 2027-03-01")
+
+    section("article_protection — dispatcher routing")
+    out = server._call_tool("article_protection", {"article": "Donald Trump"})
+    check("dispatcher routes to article_protection", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "**protected**" in out, out[:200])
+
     section("tool registry")
-    check("all 42 tools listed", len(server.TOOLS) == 42)
+    check("all 43 tools listed", len(server.TOOLS) == 43)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
