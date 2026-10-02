@@ -21,7 +21,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.32"
+SERVER_VERSION = "1.1.33"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -3678,6 +3678,155 @@ def article_protection(article: str = "", lang: str = "en") -> str:
 
 
 # ---------------------------------------------------------------------------
+# article_pulse — vital signs of an article (creation, watchers, edit velocity)
+# ---------------------------------------------------------------------------
+def _pulse_verdict(edits30: int) -> str:
+    """Plain-language activity verdict from the last-30-days edit count."""
+    if edits30 >= 30:
+        return "buzzing — edited roughly daily or more"
+    if edits30 >= 8:
+        return "active — edited about weekly"
+    if edits30 >= 1:
+        return "quiet — occasional edits"
+    return "dormant — untouched for 30+ days"
+
+
+def _days_ago_label(ts: str) -> str:
+    """Turn a MediaWiki timestamp into 'today' / '3 days ago' / '~2 years ago'."""
+    try:
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+        days = (datetime.now(timezone.utc) - dt).days
+    except Exception:
+        return ts
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    if days < 30:
+        return f"{days} days ago"
+    if days < 365:
+        months = days // 30
+        return f"~{months} month{'s' if months != 1 else ''} ago"
+    years = days // 365
+    return f"~{years} year{'s' if years != 1 else ''} ago"
+
+
+def article_pulse(article: str = "", lang: str = "en") -> str:
+    """Vital signs of a Wikipedia article — how alive is this page right now.
+
+    One-screen health check: when the article was created and by whom
+    (earliest surviving revision), page length, watcher count, the most
+    recent edit (when, who, edit summary), and edit velocity over the last
+    30 days (edit count plus number of distinct editors), capped with a
+    plain-language activity verdict (buzzing / active / quiet / dormant).
+    Follows redirects. The liveliness companion to the other trust signals:
+    `article_quality` (the grade earned), `contributors` (who edits it),
+    `revisions` (the raw edit log), and `pageviews` (the traffic).
+    Read-only via the action API (prop=info + prop=revisions) — GET only,
+    no new dependencies.
+    """
+    article = str(article or "").strip()
+    if not article:
+        return "An article title is required."
+    api = _wiki(lang)
+    base = api.replace("/w/api.php", "")
+    now = datetime.now(timezone.utc)
+    window_start = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    window_now = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        # Call 1: page info (length, watchers, url) + earliest surviving
+        # revision (creation date and creator).
+        r1 = _get(api, params={
+            "action": "query", "prop": "info|revisions",
+            "inprop": "url|watchers", "rvprop": "ids|timestamp|user",
+            "rvlimit": "1", "rvdir": "newer",
+            "titles": article, "redirects": "1", "format": "json",
+            "origin": "*",
+        })
+        r1.raise_for_status()
+        d1 = r1.json()
+        # Call 2: revisions inside the last 30 days (up to 500).
+        r2 = _get(api, params={
+            "action": "query", "prop": "revisions",
+            "rvprop": "ids|timestamp|user|comment", "rvlimit": "500",
+            "rvdir": "older", "rvstart": window_now, "rvend": window_start,
+            "titles": article, "redirects": "1", "format": "json",
+            "origin": "*",
+        })
+        r2.raise_for_status()
+        d2 = r2.json()
+    except Exception:
+        return f"Could not fetch '{article}' from Wikipedia."
+    for data in (d1, d2):
+        if "error" in data:
+            return (f"Could not check '{article}': "
+                    f"{data['error'].get('info', 'API error')}")
+    q1, q2 = d1.get("query", {}), d2.get("query", {})
+    redirs = q1.get("redirects", [])
+    page1 = next(iter(q1.get("pages", {}).values()), None)
+    page2 = next(iter(q2.get("pages", {}).values()), None)
+    if page1 is None or page2 is None:
+        return f"Could not check '{article}': unexpected API response."
+    title = page1.get("title", article)
+    link = f"[{title}]({base}/wiki/{_slug(title)})"
+    redirect_note = ""
+    if redirs:
+        chain = " → ".join(r["from"] for r in redirs) + " → " + redirs[-1]["to"]
+        redirect_note = f" (via redirect {chain})"
+    if "missing" in page1:
+        return (f"{link} doesn't exist as an article — no pulse to take."
+                f"{redirect_note}")
+    length = page1.get("length")
+    length_str = f"{length:,} bytes" if isinstance(length, int) else "unknown"
+    watchers = page1.get("watchers")
+    watchers_str = (f"{watchers:,}" if isinstance(watchers, int)
+                    else "not reported by this edition")
+    first = (page1.get("revisions") or [None])[0]
+    if first:
+        created = first.get("timestamp", "")[:10]
+        creator = first.get("user", "unknown")
+        created_str = (f"{created} ({_days_ago_label(first['timestamp'])}) "
+                       f"by {creator}")
+    else:
+        created_str = "unknown"
+    recent = page2.get("revisions") or []
+    capped = len(recent) == 500
+    edits30 = len(recent)
+    edits30_str = f"{edits30}+" if capped else str(edits30)
+    editors = sorted({r.get("user", "?") for r in recent})
+    if recent:
+        latest = recent[0]
+        lts = latest.get("timestamp", "")
+        last_str = (f"{lts[:10]} ({_days_ago_label(lts)}) by "
+                    f"{latest.get('user', 'unknown')}")
+        comment = (latest.get("comment") or "").strip()
+        if comment:
+            comment = comment if len(comment) <= 120 else comment[:117] + "..."
+            last_str += f' — "{comment}"'
+    else:
+        last_str = "no edits in the last 30 days"
+    verdict = _pulse_verdict(edits30)
+    out = (f"{link} — pulse: **{verdict}**{redirect_note}\n\n"
+           f"- **Created:** {created_str} _(earliest surviving revision; "
+           "page moves or deletions can reset this)_\n"
+           f"- **Length:** {length_str}\n"
+           f"- **Watchers:** {watchers_str}\n"
+           f"- **Last edited:** {last_str}\n"
+           f"- **Edits (last 30 days):** {edits30_str} "
+           f"by {len(editors)} editor{'s' if len(editors) != 1 else ''}")
+    if editors:
+        shown = ", ".join(f"`{e}`" for e in editors[:5])
+        more = f" (+{len(editors) - 5} more)" if len(editors) > 5 else ""
+        out += f"\n- **Recent editors:** {shown}{more}"
+    out += ("\n\n_The liveliness companion to `article_quality` (the grade "
+            "earned), `contributors` (who edits it), `revisions` (the raw "
+            "edit log), and `pageviews` (the traffic)._")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
 TOOLS = [
@@ -5023,6 +5172,38 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "article_pulse",
+        "description": (
+            "Vital signs of a Wikipedia article — how alive is this page right "
+            "now. One-screen health check: creation date and creator (earliest "
+            "surviving revision), page length, watcher count, the most recent "
+            "edit (when, who, edit summary), and edit velocity over the last "
+            "30 days (edit count plus distinct editors), capped with a "
+            "plain-language activity verdict (buzzing / active / quiet / "
+            "dormant). Follows redirects. The liveliness companion to "
+            "`article_quality` (the grade earned), `contributors` (who edits "
+            "it), `revisions` (the raw edit log), and `pageviews` (the "
+            "traffic). Read-only via the action API — GET only, no new "
+            "dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "article": {
+                    "type": "string",
+                    "description": "Article title to take the pulse of (e.g. 'Python (programming language)')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -5113,6 +5294,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_flags(**args)
     if name == "article_protection":
         return article_protection(**args)
+    if name == "article_pulse":
+        return article_pulse(**args)
     return f"Unknown tool: {name}"
 
 

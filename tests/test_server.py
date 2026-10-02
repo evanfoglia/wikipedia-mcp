@@ -946,10 +946,49 @@ def main() -> int:
     check("dispatcher routes to article_protection", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "**protected**" in out, out[:200])
 
+    section("article_pulse — helpers")
+    check("50 edits -> buzzing", server._pulse_verdict(50) == "buzzing — edited roughly daily or more")
+    check("10 edits -> active", server._pulse_verdict(10) == "active — edited about weekly")
+    check("3 edits -> quiet", server._pulse_verdict(3) == "quiet — occasional edits")
+    check("0 edits -> dormant", server._pulse_verdict(0) == "dormant — untouched for 30+ days")
+    check("today label", server._days_ago_label("2026-10-02T12:00:00Z") == "today")
+    check("yesterday label", server._days_ago_label("2026-10-01T12:00:00Z") == "yesterday")
+    check("days-ago label", server._days_ago_label("2026-09-22T12:00:00Z") == "10 days ago")
+    check("bad timestamp passthrough", server._days_ago_label("not-a-time") == "not-a-time")
+
+    section("article_pulse — active article")
+    out = server.article_pulse("Python (programming language)")
+    check("pulse header", "— pulse:" in out, out[:300])
+    check("verdict present", any(v in out for v in ("buzzing", "active", "quiet", "dormant")), out[:300])
+    check("created line", "**Created:**" in out and "by" in out, out[:600])
+    check("length line", "**Length:**" in out and "bytes" in out, out[:600])
+    check("watchers line", "**Watchers:**" in out, out[:600])
+    check("last-edited line", "**Last edited:**" in out, out[:800])
+    check("30-day velocity line", "**Edits (last 30 days):**" in out, out[:1000])
+    check("recent editors listed", "**Recent editors:**" in out, out[:1200])
+
+    section("article_pulse — missing article")
+    out = server.article_pulse("ThisArticleDoesNotExistZZZ123")
+    check("missing reported", "doesn't exist" in out, out[:200])
+
+    section("article_pulse — empty article")
+    out = server.article_pulse("")
+    check("empty title reported", "title is required" in out, out[:200])
+
+    section("article_pulse — redirect")
+    out = server.article_pulse("USA")
+    check("redirect chain named", "USA → United States" in out, out[:200])
+    check("resolved title linked", "[United States]" in out, out[:200])
+
+    section("article_pulse — dispatcher routing")
+    out = server._call_tool("article_pulse", {"article": "Python (programming language)"})
+    check("dispatcher routes to article_pulse", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "— pulse:" in out, out[:300])
+
     section("tool registry")
-    check("all 43 tools listed", len(server.TOOLS) == 43)
+    check("all 44 tools listed", len(server.TOOLS) == 44)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
