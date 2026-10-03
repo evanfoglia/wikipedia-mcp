@@ -5,6 +5,7 @@ Run: python3 tests/test_server.py
 """
 
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Allow running from repo root
@@ -951,9 +952,12 @@ def main() -> int:
     check("10 edits -> active", server._pulse_verdict(10) == "active — edited about weekly")
     check("3 edits -> quiet", server._pulse_verdict(3) == "quiet — occasional edits")
     check("0 edits -> dormant", server._pulse_verdict(0) == "dormant — untouched for 30+ days")
-    check("today label", server._days_ago_label("2026-10-02T12:00:00Z") == "today")
-    check("yesterday label", server._days_ago_label("2026-10-01T12:00:00Z") == "yesterday")
-    check("days-ago label", server._days_ago_label("2026-09-22T12:00:00Z") == "10 days ago")
+    # Dates computed relative to "now" so these stay green any day they're run
+    today = datetime.now(timezone.utc)
+    ts = lambda d: (today - timedelta(days=d)).strftime("%Y-%m-%dT12:00:00Z")
+    check("today label", server._days_ago_label(ts(0)) == "today")
+    check("yesterday label", server._days_ago_label(ts(1)) == "yesterday")
+    check("days-ago label", server._days_ago_label(ts(10)) == "10 days ago")
     check("bad timestamp passthrough", server._days_ago_label("not-a-time") == "not-a-time")
 
     section("article_pulse — active article")
@@ -985,10 +989,51 @@ def main() -> int:
     check("dispatcher routes to article_pulse", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "— pulse:" in out, out[:300])
 
+    section("citation_sources — helpers")
+    check("www + co.uk collapse", server._registrable_domain("www.news.bbc.co.uk") == "bbc.co.uk")
+    check("edu host collapse", server._registrable_domain("pubmed.ncbi.nlm.nih.gov") == "nih.gov")
+    check("plain two-label", server._registrable_domain("books.google.com") == "google.com")
+    check("bare domain passthrough", server._registrable_domain("ipcc.ch") == "ipcc.ch")
+    check("ip passthrough", server._registrable_domain("192.0.2.1") == "192.0.2.1")
+    check("port stripped", server._registrable_domain("example.com:8080") == "example.com")
+
+    section("citation_sources — scholarly article")
+    out = server.citation_sources("Climate change", limit=10)
+    check("sources header", "Citation sources for" in out and "Climate change" in out, out[:300])
+    check("verdict present", any(v in out for v in ("diverse", "lopsided", "top-heavy", "balanced", "thin")), out[:300])
+    check("totals line", "references" in out and "unique publishers" in out, out[:400])
+    check("table present", "| Source domain | Citations | Share of linked refs |" in out, out[:500])
+    check("doi.org ranked", "`doi.org`" in out, out[:800])
+    check("archived line", "**Archived:**" in out, out[:1500])
+    check("scholarly line", "**Scholarly (DOI):**" in out, out[:1500])
+
+    section("citation_sources — missing article")
+    out = server.citation_sources("ThisArticleDoesNotExistZZZ123")
+    check("missing reported", "not found" in out, out[:200])
+
+    section("citation_sources — empty article")
+    out = server.citation_sources("")
+    check("empty title reported", "title is required" in out, out[:200])
+
+    section("citation_sources — redirect")
+    out = server.citation_sources("USA", limit=3)
+    check("redirect resolves", 'Citation sources for "United States"' in out, out[:200])
+
+    section("citation_sources — clamping + type safety")
+    out = server.citation_sources("Eiffel Tower", limit=500)
+    check("limit clamps to 30", out.count("| `") <= 30, out[:100])
+    out = server.citation_sources("Eiffel Tower", limit="abc")
+    check("bad limit falls back to 15", out.count("| `") <= 15, out[:100])
+
+    section("citation_sources — dispatcher routing")
+    out = server._call_tool("citation_sources", {"title": "Velociraptor", "limit": 3})
+    check("dispatcher routes to citation_sources", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Citation sources for" in out, out[:300])
+
     section("tool registry")
-    check("all 44 tools listed", len(server.TOOLS) == 44)
+    check("all 45 tools listed", len(server.TOOLS) == 45)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1765,6 +1810,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "article_flags":
             out = server._call_tool(name, {"article": "Eiffel Tower"})
+        elif name == "citation_sources":
+            out = server._call_tool(name, {"title": "Velociraptor", "limit": 3})
         elif name == "simple_summary":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
