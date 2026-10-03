@@ -12,6 +12,7 @@ import json
 import random
 import re
 import sys
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from html import unescape
 from typing import Optional
@@ -21,7 +22,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.33"
+SERVER_VERSION = "1.1.34"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -2676,6 +2677,203 @@ def references(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+# ---------------------------------------------------------------------------
+# citation_sources — where does this article's evidence come from?
+# ---------------------------------------------------------------------------
+# Multi-level public suffixes we collapse when computing a link's
+# "registrable domain" (so www.bbc.co.uk and news.bbc.co.uk both count
+# as bbc.co.uk). Kept small and hand-curated — enough for Wikipedia's
+# most-cited domains without pulling in a public-suffix dependency.
+_DOMAIN_SUFFIXES = frozenset({
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "ltd.uk", "plc.uk",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au",
+    "co.nz", "ac.nz", "govt.nz",
+    "co.jp", "or.jp", "ac.jp", "go.jp", "ne.jp", "ed.jp",
+    "co.kr", "or.kr", "ac.kr", "go.kr", "ne.kr",
+    "com.br", "org.br", "gov.br", "edu.br", "net.br",
+    "co.in", "org.in", "gov.in", "ac.in", "edu.in",
+    "co.za", "org.za", "gov.za", "ac.za", "edu.za",
+    "com.cn", "org.cn", "gov.cn", "edu.cn", "net.cn",
+    "com.tr", "org.tr", "gov.tr", "edu.tr",
+    "co.il", "org.il", "gov.il", "ac.il", "edu.il",
+    "com.tw", "org.tw", "gov.tw", "edu.tw",
+    "co.th", "or.th", "ac.th", "go.th",
+    "com.mx", "org.mx", "gob.mx", "edu.mx",
+    "com.ar", "org.ar", "gov.ar", "edu.ar",
+    "com.co", "org.co", "gov.co", "edu.co",
+    "com.pe", "org.pe", "gob.pe", "edu.pe",
+    "com.ve", "org.ve", "gob.ve", "edu.ve",
+    "com.ec", "org.ec", "gob.ec", "edu.ec",
+    "com.uy", "org.uy", "gub.uy", "edu.uy",
+    "com.py", "org.py", "gov.py", "edu.py",
+    "com.bo", "org.bo", "gob.bo", "edu.bo",
+    "com.cl", "gob.cl", "edu.cl",
+    "com.hk", "org.hk", "gov.hk", "edu.hk",
+    "com.sg", "org.sg", "gov.sg", "edu.sg",
+})
+
+
+def _registrable_domain(host: str) -> str:
+    """Collapse a hostname to its registrable domain.
+
+    Strips a leading www. and well-known second-level suffixes, so
+    www.bbc.co.uk -> bbc.co.uk and en.wikipedia.org -> wikipedia.org.
+    IP addresses and single-label hosts are returned unchanged.
+    """
+    host = (host or "").lower().split("@")[-1].split(":")[0].strip().strip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    if not host or re.fullmatch(r"[0-9.]+", host) or "." not in host:
+        return host
+    labels = host.split(".")
+    if len(labels) > 2 and ".".join(labels[-2:]) in _DOMAIN_SUFFIXES:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+def citation_sources(title: str, limit: int = 15, lang: str = "en") -> str:
+    """Show which publishers an article leans on — its sources by domain.
+
+    Aggregates the article's reference list into a publisher map: every
+    off-wiki link cited in the numbered references is grouped by
+    registrable domain (so all *.bbc.co.uk citations land under
+    bbc.co.uk), then ranked by citation count with each domain's share of
+    linked references. Also reports the share of citations with archived
+    (Wayback Machine / archive.org) copies and the share pointing at
+    DOI-linked scholarly works.
+
+    This is the diversity lens for the "can I rely on this article?"
+    audit: `references` shows you the full bibliography, `citation_sources`
+    tells you at a glance whether it's balanced (dozens of independent
+    publishers) or lopsided (half the evidence from one outlet) — and
+    whether the evidence is archived or link-rotting. Pairs with
+    `article_quality` (the grade earned), `article_flags` (editorial
+    warnings), and `citation_needed` (unsourced claims).
+
+    Reads the rendered references list from the MediaWiki parse API —
+    read-only GET, no new dependencies. Follows redirects. `limit`
+    clamps the number of domains shown (default 15, max 30).
+    """
+    title = str(title or "").strip()
+    if not title:
+        return "An article title is required."
+    try:
+        limit = max(1, min(int(limit), 30))
+    except (TypeError, ValueError):
+        limit = 15
+    params = {
+        "action": "parse",
+        "page": title,
+        "prop": "text",
+        "redirects": 1,
+        "format": "json",
+        "formatversion": "2",
+        "origin": "*",
+    }
+    resp = _get(_wiki(lang), params=params)
+    if resp.status_code == 404:
+        return f"Article '{title}' not found on Wikipedia."
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        return f"Article '{title}' not found on Wikipedia."
+    parsed = data.get("parse", {})
+    page_title = parsed.get("title", title)
+    html_text = parsed.get("text", "")
+
+    items = []
+    for block in re.findall(r'<ol class="references">(.*?)</ol>', html_text, re.S):
+        items.extend(re.findall(r"<li[^>]*>(.*?)</li>", block, re.S))
+    if not items:
+        return (
+            f"No references found for '{page_title}' on {lang}.wikipedia.org — "
+            "nothing to aggregate. Try `references` to confirm, or `summary` "
+            "for the article itself."
+        )
+
+    linked = 0          # references containing >=1 off-wiki link
+    archived = 0        # references with a Wayback/archive.org link
+    doi_refs = 0        # references linking a DOI
+    domain_counts = Counter()
+    for item in items:
+        seen = set()
+        has_link = False
+        has_archive = False
+        has_doi = False
+        for href in re.findall(r'href="([^"]+)"', item):
+            href = href.strip()
+            if not href.startswith(("http://", "https://")):
+                continue
+            host = href.split("/", 3)[2].lower().split("@")[-1].split(":")[0]
+            if host.endswith((".wikipedia.org", ".wikimedia.org")):
+                continue  # keep it to real off-wiki sources
+            has_link = True
+            if host in ("web.archive.org", "archive.org") or host.endswith(
+                (".web.archive.org", ".archive.org")
+            ):
+                has_archive = True
+            if host in ("doi.org", "dx.doi.org"):
+                has_doi = True
+            domain = _registrable_domain(host)
+            if domain and domain not in seen:
+                seen.add(domain)
+                domain_counts[domain] += 1
+        if has_link:
+            linked += 1
+        if has_archive:
+            archived += 1
+        if has_doi:
+            doi_refs += 1
+
+    if not domain_counts:
+        return (
+            f'"{page_title}" cites {len(items)} references, but none link to '
+            "off-wiki sources (they may be bare text citations). Try "
+            "`references` to read them."
+        )
+
+    total = len(items)
+    unique = len(domain_counts)
+    ranked = domain_counts.most_common(limit)
+    top_domain, top_count = ranked[0]
+    top_share = top_count / max(linked, 1)
+
+    if linked < 5:
+        verdict = "thin — almost no linked sources to judge from"
+    elif top_share >= 0.5:
+        verdict = (f"lopsided — {top_domain} alone backs "
+                   f"{top_share:.0%} of linked citations")
+    elif top_share >= 0.3:
+        verdict = (f"top-heavy — {top_domain} backs "
+                   f"{top_share:.0%} of linked citations")
+    elif unique >= 10:
+        verdict = "diverse — evidence spread across many publishers"
+    else:
+        verdict = "balanced — no single publisher dominates"
+
+    out = (f'**Citation sources for "{page_title}"** — {verdict}\n\n'
+           f"{total} references · {linked} with off-wiki links · "
+           f"{unique} unique publishers\n\n"
+           f"| Source domain | Citations | Share of linked refs |\n"
+           f"| --- | ---: | ---: |\n")
+    for domain, count in ranked:
+        share = count / max(linked, 1)
+        out += f"| `{domain}` | {count} | {share:.0%} |\n"
+    if unique > limit:
+        out += f"\n_+{unique - limit} more publishers beyond the top {limit}._\n"
+    out += ("\n"
+            f"- **Archived:** {archived}/{linked} linked citations "
+            f"({archived / max(linked, 1):.0%}) have a Wayback Machine / "
+            "archive.org copy\n"
+            f"- **Scholarly (DOI):** {doi_refs}/{linked} linked citations "
+            f"({doi_refs / max(linked, 1):.0%}) point at DOI-linked works\n"
+            "\n_The diversity lens for the \"can I rely on this article?\" "
+            "audit — pair with `references` for the full bibliography, "
+            "`article_quality` for the grade, and `article_flags` for "
+            "editorial warnings._")
+    return out
+
+
 def revision_diff(title: str, rev_from: int, rev_to: int, limit: int = 100,
                   lang: str = "en") -> str:
     """Compare two revisions of an article and show exactly what changed.
@@ -5204,6 +5402,48 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "citation_sources",
+        "description": (
+            "Which publishers an article's evidence comes from — its sources "
+            "by domain. Aggregates the article's reference list into a "
+            "publisher map: every off-wiki link cited in the numbered "
+            "references is grouped by registrable domain (so all *.bbc.co.uk "
+            "citations land under bbc.co.uk) and ranked by citation count, "
+            "with each domain's share of linked references. Also reports the "
+            "share of citations with archived (Wayback Machine / archive.org) "
+            "copies and the share pointing at DOI-linked scholarly works. "
+            "The diversity lens for the \"can I rely on this article?\" audit: "
+            "shows at a glance whether the bibliography is balanced (dozens "
+            "of independent publishers) or lopsided (half the evidence from "
+            "one outlet). Follows redirects. Pairs with `references` (the "
+            "full bibliography), `article_quality` (the grade), "
+            "`article_flags` (editorial warnings), and `citation_needed` "
+            "(unsourced claims). Read-only via the action API — GET only, no "
+            "new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title to analyze the sources of (e.g. 'Climate change')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max source domains to show (default 15, max 30)",
+                    "default": 15,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -5296,6 +5536,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_protection(**args)
     if name == "article_pulse":
         return article_pulse(**args)
+    if name == "citation_sources":
+        return citation_sources(**args)
     return f"Unknown tool: {name}"
 
 
