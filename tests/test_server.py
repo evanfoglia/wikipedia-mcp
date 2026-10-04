@@ -1031,9 +1031,9 @@ def main() -> int:
     check("dispatcher returned real content", "Citation sources for" in out, out[:300])
 
     section("tool registry")
-    check("all 45 tools listed", len(server.TOOLS) == 45)
+    check("all 46 tools listed", len(server.TOOLS) == 46)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1735,6 +1735,52 @@ def main() -> int:
     out = server.get_summary("Berlin", lang="Klingon")
     check("unsupported lang still returns an article", out.startswith("## "), out[:200])
 
+    section("article_path — two hops")
+    out = server.article_path("Albert Einstein", "Quantum mechanics")
+    check("2-hop header", "**2 hops**" in out, out[:200])
+    check("middles listed", "Arthur Eddington" in out, out[:800])
+    check("scan footer", "Scanned the first" in out, out[-400:])
+
+    section("article_path — one hop")
+    out = server.article_path("Cat", "Dog")
+    check("1-hop header", "**1 hop**" in out, out[:200])
+    check("direct link shown", "Cat" in out and "Dog" in out, out[:200])
+
+    section("article_path — three hops")
+    out = server.article_path("Banana", "Trojan War", max_hops=3)
+    check("3-hop header", "**3 hops**" in out, out[:200])
+    check("endpoints shown", "Banana" in out and "Trojan War" in out, out[:400])
+
+    section("article_path — same article")
+    out = server.article_path("Albert Einstein", "Albert Einstein")
+    check("0 hops reported", "**0 hops**" in out, out[:200])
+
+    section("article_path — redirect resolves to same")
+    out = server.article_path("USA", "United States")
+    check("redirect same-article", "**0 hops**" in out, out[:200])
+
+    section("article_path — missing article")
+    out = server.article_path("ThisArticleDoesNotExistZZZ123", "Cat")
+    check("missing reported", "not found" in out, out[:200])
+
+    section("article_path — empty title")
+    out = server.article_path("", "Cat")
+    check("empty reported", "required" in out, out[:200])
+
+    section("article_path — max_hops=1 misses")
+    out = server.article_path("Albert Einstein", "Quantum mechanics", max_hops=1)
+    check("1-hop miss reported", "No direct link" in out, out[:200])
+
+    section("article_path — max_hops clamps + type safety")
+    out = server.article_path("Banana", "Trojan War", max_hops=99)
+    check("max_hops clamps to 3", "**3 hops**" in out, out[:200])
+    out = server.article_path("Banana", "Trojan War", max_hops="abc")
+    check("bad max_hops falls back to 2", "No path within 2 hops" in out, out[:200])
+
+    section("article_path — dispatcher routing")
+    out = server._call_tool("article_path", {"start": "Cat", "target": "Dog"})
+    check("dispatcher routes to article_path", "Unknown tool" not in out, out[:200])
+
     section("_call_tool dispatch routing")
     # Every registered MCP tool name must route through the dispatcher
     # (i.e. NOT return the "Unknown tool" fallback). This is the layer
@@ -1812,6 +1858,8 @@ def main() -> int:
             out = server._call_tool(name, {"article": "Eiffel Tower"})
         elif name == "citation_sources":
             out = server._call_tool(name, {"title": "Velociraptor", "limit": 3})
+        elif name == "article_path":
+            out = server._call_tool(name, {"start": "Cat", "target": "Dog"})
         elif name == "simple_summary":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
