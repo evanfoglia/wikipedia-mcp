@@ -22,7 +22,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.34"
+SERVER_VERSION = "1.1.35"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -2874,6 +2874,184 @@ def citation_sources(title: str, limit: int = 15, lang: str = "en") -> str:
     return out
 
 
+# article_path — the six-degrees finder: shortest click-path between two articles
+# ---------------------------------------------------------------------------
+
+# How many links/backlinks we sample per page per level, and how many pages
+# we expand when searching 3-hop paths. Kept bounded: a 3-hop search costs
+# at most 2 + _PATH_EXPAND_LIMIT read-only API calls.
+_PATH_LINK_LIMIT = 500
+_PATH_EXPAND_LIMIT = 25
+
+
+def _page_link_graph(title: str, lang: str, prop: str) -> tuple:
+    """Read one page's link neighbourhood from the read-only action API.
+
+    prop="links" returns the page's outgoing article links; prop="linkshere"
+    returns the non-redirect article pages linking *to* it. Main namespace
+    only. Follows redirects.
+
+    Returns (canonical_title, [titles]). Raises LookupError when the page
+    does not exist.
+    """
+    titles = []
+    cont = None
+    canonical = title
+    while True:
+        params = {
+            "action": "query",
+            "titles": title,
+            "prop": prop,
+            "redirects": 1,
+            "format": "json",
+            "formatversion": 2,
+            "origin": "*",
+        }
+        if prop == "links":
+            params.update({"pllimit": _PATH_LINK_LIMIT, "plnamespace": 0})
+            if cont:
+                params["plcontinue"] = cont
+            key, cont_key = "links", "plcontinue"
+        else:
+            params.update({"lhlimit": _PATH_LINK_LIMIT, "lhnamespace": 0,
+                           "lhshow": "!redirect"})
+            if cont:
+                params["lhcontinue"] = cont
+            key, cont_key = "linkshere", "lhcontinue"
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        if "error" in data:
+            raise LookupError(data["error"].get("info", "API error"))
+        query = data.get("query", {})
+        for redir in query.get("redirects") or []:
+            canonical = redir.get("to", canonical)
+        pages = query.get("pages", [])
+        if not pages or pages[0].get("missing"):
+            raise LookupError(
+                f"'{title}' was not found on {lang}.wikipedia.org.")
+        page = pages[0]
+        canonical = page.get("title", canonical)
+        for entry in page.get(key, []):
+            if entry.get("ns", 0) == 0:
+                titles.append(entry["title"])
+        cont = (data.get("continue") or {}).get(cont_key)
+        if not cont or len(titles) >= _PATH_LINK_LIMIT:
+            break
+    return canonical, titles[:_PATH_LINK_LIMIT]
+
+
+def article_path(start: str, target: str, max_hops: int = 2,
+                 lang: str = "en") -> str:
+    """Find the shortest click-path between two articles — the six-degrees game.
+
+    Given two article titles, searches Wikipedia's link graph for the
+    shortest chain of blue links connecting them, e.g.
+    Banana → Africa → Anatolia → Trojan War (3 hops).
+
+    The search is bidirectional and bounded, using only read-only action
+    API GETs (no new dependencies):
+      - 1 hop: `target` is directly linked from `start`
+      - 2 hops: intersects `start`'s outgoing links with the pages linking
+        *to* `target` — every middle found is a real start → middle →
+        target path
+      - 3 hops: expands a bounded sample of `start`'s outgoing links and
+        looks for one whose own links land on a page linking to `target`
+
+    Follows redirects (so "USA" → "United States" is 0 hops). Only the
+    first 500 outgoing links and 500 backlinks per page are scanned, and at
+    most 25 pages are expanded for 3-hop searches — the report states
+    exactly what was scanned. `max_hops` clamps to 1..3 (default 2).
+
+    The discovery companion to `links` (raw outgoing links) and
+    `backlinks` (every page linking in): use it for six-degrees games,
+    tracing how topics connect, or finding the surprising middle article
+    that bridges two distant subjects.
+    """
+    start = str(start or "").strip()
+    target = str(target or "").strip()
+    if not start or not target:
+        return "Both `start` and `target` article titles are required."
+    try:
+        max_hops = max(1, min(int(max_hops), 3))
+    except (TypeError, ValueError):
+        max_hops = 2
+
+    def _mdlink(title: str) -> str:
+        safe = title.replace(" ", "_")
+        return f"[{title}](https://{lang}.wikipedia.org/wiki/{safe})"
+
+    try:
+        start_c, fwd = _page_link_graph(start, lang, "links")
+        target_c, back = _page_link_graph(target, lang, "linkshere")
+    except LookupError as exc:
+        return f"Couldn't find a path: {exc}"
+    except requests.RequestException as exc:
+        return f"Couldn't find a path: the Wikipedia request failed ({exc})."
+
+    header = f"## Path: {_mdlink(start_c)} → {_mdlink(target_c)}\n\n"
+    footer = (
+        f"\n\n_Scanned the first {len(fwd)} outgoing links of "
+        f"\"{start_c}\" and the first {len(back)} pages linking to "
+        f"\"{target_c}\". Explore the graph manually with `links` (outgoing) "
+        f"and `backlinks` (every page linking in)._")
+
+    if start_c == target_c:
+        return (f"{header}**0 hops** — \"{start_c}\" and \"{target_c}\" are "
+                "the same article (after resolving redirects).")
+
+    if target_c in fwd:
+        return (f"{header}**1 hop** — a direct link:\n\n"
+                f"{_mdlink(start_c)} → {_mdlink(target_c)}{footer}")
+
+    if max_hops >= 2:
+        back_set = set(back)
+        middles = [t for t in fwd
+                   if t in back_set and t not in (start_c, target_c)]
+        if middles:
+            shown = middles[:10]
+            lines = [f"{i + 1}. {_mdlink(start_c)} → {_mdlink(m)} → "
+                     f"{_mdlink(target_c)}"
+                     for i, m in enumerate(shown)]
+            extra = (f"\n_…and {len(middles) - len(shown)} more._"
+                     if len(middles) > len(shown) else "")
+            noun = "middle article" if len(middles) == 1 else "middle articles"
+            return (f"{header}**2 hops** — {len(middles)} {noun} connect "
+                    f"them:\n\n" + "\n".join(lines) + extra + footer)
+
+    if max_hops >= 3:
+        back_set = set(back)
+        scanned = 0
+        for mid in fwd:
+            if mid in (start_c, target_c):
+                continue
+            scanned += 1
+            if scanned > _PATH_EXPAND_LIMIT:
+                break
+            try:
+                _, mid_links = _page_link_graph(mid, lang, "links")
+            except (LookupError, requests.RequestException):
+                continue
+            hit = next((y for y in mid_links
+                        if y in back_set and y not in (start_c, target_c)),
+                       None)
+            if hit:
+                return (
+                    f"{header}**3 hops** — one route through the link graph:\n\n"
+                    f"{_mdlink(start_c)} → {_mdlink(mid)} → {_mdlink(hit)} → "
+                    f"{_mdlink(target_c)}\n\n"
+                    f"_Expanded {scanned} of \"{start_c}\"'s outgoing links "
+                    f"to find it._" + footer)
+
+    if max_hops == 1:
+        return (f"{header}No direct link from \"{start_c}\" to \"{target_c}\" "
+                f"(checked the first {len(fwd)} outgoing links). Raise "
+                "`max_hops` to 2 or 3 to search further.")
+    return (f"{header}No path within {max_hops} hops from \"{start_c}\" to "
+            f"\"{target_c}\". Try broader, better-connected articles, or "
+            "check `links` and `backlinks` to explore the graph manually.")
+
+
 def revision_diff(title: str, rev_from: int, rev_to: int, limit: int = 100,
                   lang: str = "en") -> str:
     """Compare two revisions of an article and show exactly what changed.
@@ -5444,6 +5622,46 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "article_path",
+        "description": (
+            "Find the shortest click-path between two articles — the "
+            "six-degrees game. Given two article titles, searches "
+            "Wikipedia's link graph for the shortest chain of blue links "
+            "connecting them (e.g. Banana → Africa → Anatolia → Trojan War). "
+            "Bidirectional and bounded: 1 hop checks a direct link, 2 hops "
+            "intersects the start's outgoing links with pages linking to "
+            "the target, 3 hops expands a bounded sample of the start's "
+            "links. Follows redirects. The discovery companion to `links` "
+            "and `backlinks`. Read-only action API — GET only, no new "
+            "dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "start": {
+                    "type": "string",
+                    "description": "Starting article title (e.g. 'Banana')",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Target article title (e.g. 'Trojan War')",
+                },
+                "max_hops": {
+                    "type": "integer",
+                    "description": "Max path length to search (default 2, max 3)",
+                    "default": 2,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["start", "target"],
+        },
+    },
 ]
 
 
@@ -5538,6 +5756,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_pulse(**args)
     if name == "citation_sources":
         return citation_sources(**args)
+    if name == "article_path":
+        return article_path(**args)
     return f"Unknown tool: {name}"
 
 
