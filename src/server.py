@@ -22,7 +22,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.35"
+SERVER_VERSION = "1.1.36"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -3052,6 +3052,119 @@ def article_path(start: str, target: str, max_hops: int = 2,
             "check `links` and `backlinks` to explore the graph manually.")
 
 
+def article_at_date(title: str, date: str, lang: str = "en") -> str:
+    """Show what an article said on a given date — the time machine.
+
+    Finds the latest surviving revision of the article at or before the
+    end of `date` (YYYY-MM-DD) via the action API's revision listing
+    (`rvstart` + `rvdir=older`), then renders that old revision through
+    the parse API and returns its lead text — how the article read on
+    that day. Follows redirects.
+
+    The report leads with the revision metadata (revision ID, timestamp,
+    editor, edit summary) and a permanent link to the exact revision, so
+    the reader can verify the snapshot. If the article had no surviving
+    revision before the date, the report says so and names the article's
+    first surviving revision instead.
+
+    The history companion to `summary` (the article as it reads now),
+    `revisions` (the raw edit log), and `revision_diff` (what changed
+    between two revisions): use it to see what an article claimed before
+    an event, how a biography's lead evolved, or what a page looked like
+    years ago. Read-only via the action API — GET only, no new
+    dependencies.
+    """
+    title = str(title or "").strip()
+    if not title:
+        return "An article `title` is required."
+    try:
+        day = datetime.strptime(str(date or "").strip(), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return ("`date` must be a calendar date in YYYY-MM-DD format "
+                f"(got {date!r}).")
+
+    def _rev_query(extra: dict) -> dict:
+        params = {
+            "action": "query",
+            "prop": "revisions",
+            "titles": title,
+            "redirects": 1,
+            "rvlimit": 1,
+            "rvprop": "ids|timestamp|user|comment",
+            "format": "json",
+            "origin": "*",
+        }
+        params.update(extra)
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    try:
+        # Latest revision at or before the end of the requested day.
+        data = _rev_query({"rvstart": day.isoformat() + "T23:59:59Z",
+                           "rvdir": "older"})
+    except requests.RequestException as exc:
+        return f"Couldn't look up the article's history: the Wikipedia request failed ({exc})."
+    pages = data.get("query", {}).get("pages", {})
+    page = next(iter(pages.values()), {}) if pages else {}
+    if not page or "missing" in page:
+        return f"Article '{title}' not found on Wikipedia."
+    revs = page.get("revisions") or []
+    resolved = page.get("title", title)
+    if not revs:
+        # Nothing existed yet on that date — name the first surviving
+        # revision so the caller knows when the article's history starts.
+        try:
+            first = _rev_query({"rvdir": "newer"})
+            fp = next(iter(first.get("query", {}).get("pages", {}).values()), {})
+            fts = (fp.get("revisions") or [{}])[0].get("timestamp", "")
+        except requests.RequestException:
+            fts = ""
+        note = (f" (the article's first surviving revision is from {fts})"
+                if fts else "")
+        return (f"No surviving revision of '{resolved}' existed before "
+                f"{day.isoformat()}{note}.")
+
+    rev = revs[0]
+    revid = rev.get("revid")
+    ts = rev.get("timestamp", "")
+    editor = rev.get("user", "unknown")
+    comment = (rev.get("comment") or "").strip() or "(no edit summary)"
+
+    try:
+        # TextExtracts supports revids: clean lead-section plain text of the
+        # old revision, without the infobox/navbox noise of raw HTML.
+        resp = _get(_wiki(lang), params={
+            "action": "query",
+            "prop": "extracts",
+            "revids": revid,
+            "explaintext": 1,
+            "exintro": 1,
+            "format": "json",
+            "origin": "*",
+        })
+        resp.raise_for_status()
+        pages = resp.json().get("query", {}).get("pages", {})
+        old = next(iter(pages.values()), {}) if pages else {}
+    except requests.RequestException as exc:
+        return (f"Found the revision ({revid}, {ts}) but couldn't read "
+                f"it: the Wikipedia request failed ({exc}).")
+    lead = (old.get("extract") or "").strip()
+    if not lead:
+        return (f"Revision {revid} ({ts}) of '{resolved}' has no readable "
+                f"lead text.")
+
+    desktop_url = (f"https://{lang}.wikipedia.org/w/index.php?"
+                   f"title={_slug(resolved)}&oldid={revid}")
+    return (f"## {resolved} — as it read on {day.isoformat()}\n\n"
+            f"_Revision {revid} from {ts}, edited by {editor}._\n"
+            f"_Edit summary: {comment}_\n\n"
+            f"{lead}\n\n"
+            f"[View this exact revision →]({desktop_url})\n\n"
+            f"_Compare with the current article via `summary`, or with "
+            f"another snapshot via `revision_diff`._")
+
+
 def revision_diff(title: str, rev_from: int, rev_to: int, limit: int = 100,
                   lang: str = "en") -> str:
     """Compare two revisions of an article and show exactly what changed.
@@ -5662,6 +5775,41 @@ TOOLS = [
             "required": ["start", "target"],
         },
     },
+    {
+        "name": "article_at_date",
+        "description": (
+            "Show what an article said on a given date — the time machine. "
+            "Given an article title and a YYYY-MM-DD date, finds the latest "
+            "surviving revision at or before that day and returns its lead "
+            "text: how the article read then, with the revision ID, "
+            "timestamp, editor, edit summary, and a permanent link to the "
+            "exact revision. Follows redirects; reports clearly when the "
+            "article had no revision before the date. The history companion "
+            "to `summary` (the article now), `revisions` (the raw edit "
+            "log), and `revision_diff` (what changed between revisions). "
+            "Read-only via the action API — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article title (e.g. 'ChatGPT')",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Date to look back to, YYYY-MM-DD (e.g. '2023-01-01')",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["title", "date"],
+        },
+    },
 ]
 
 
@@ -5758,6 +5906,8 @@ def _call_tool(name: str, args: dict) -> str:
         return citation_sources(**args)
     if name == "article_path":
         return article_path(**args)
+    if name == "article_at_date":
+        return article_at_date(**args)
     return f"Unknown tool: {name}"
 
 
