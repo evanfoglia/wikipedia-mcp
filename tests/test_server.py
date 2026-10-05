@@ -1031,9 +1031,9 @@ def main() -> int:
     check("dispatcher returned real content", "Citation sources for" in out, out[:300])
 
     section("tool registry")
-    check("all 46 tools listed", len(server.TOOLS) == 46)
+    check("all 47 tools listed", len(server.TOOLS) == 47)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1781,6 +1781,39 @@ def main() -> int:
     out = server._call_tool("article_path", {"start": "Cat", "target": "Dog"})
     check("dispatcher routes to article_path", "Unknown tool" not in out, out[:200])
 
+    section("article_at_date — historical snapshot")
+    out = server.article_at_date("ChatGPT", "2023-01-15")
+    check("dated header", "## ChatGPT — as it read on 2023-01-15" in out, out[:200])
+    check("revision metadata", "Revision 1133794731" in out, out[:300])
+    check("lead text from that era", "generative AI chatbot" in out, out[:1200])
+    check("permanent link", "oldid=1133794731" in out, out[-500:])
+    check("no navbox noise", "Part of a series on" not in out, out[:1500])
+
+    section("article_at_date — bad date format")
+    out = server.article_at_date("ChatGPT", "Jan 2023")
+    check("format message", "YYYY-MM-DD" in out, out)
+
+    section("article_at_date — date before the article existed")
+    out = server.article_at_date("ChatGPT", "2019-05-05")
+    check("pre-creation reported", "No surviving revision" in out, out)
+    check("first revision named", "first surviving revision" in out, out)
+
+    section("article_at_date — missing article")
+    out = server.article_at_date("ThisArticleDoesNotExistZZZ123", "2023-01-15")
+    check("missing reported", "not found" in out, out)
+
+    section("article_at_date — empty title")
+    out = server.article_at_date("", "2023-01-15")
+    check("empty reported", "required" in out, out)
+
+    section("article_at_date — redirect resolves")
+    out = server.article_at_date("USA", "2020-06-01")
+    check("redirect resolved", "## United States — as it read on 2020-06-01" in out, out[:200])
+
+    section("article_at_date — dispatcher routing")
+    out = server._call_tool("article_at_date", {"title": "ChatGPT", "date": "2023-01-15"})
+    check("dispatcher routes to article_at_date", "Unknown tool" not in out, out[:200])
+
     section("_call_tool dispatch routing")
     # Every registered MCP tool name must route through the dispatcher
     # (i.e. NOT return the "Unknown tool" fallback). This is the layer
@@ -1860,6 +1893,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor", "limit": 3})
         elif name == "article_path":
             out = server._call_tool(name, {"start": "Cat", "target": "Dog"})
+        elif name == "article_at_date":
+            out = server._call_tool(name, {"title": "ChatGPT", "date": "2023-01-15"})
         elif name == "simple_summary":
             out = server._call_tool(name, {"title": "Velociraptor"})
         else:
