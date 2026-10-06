@@ -4,6 +4,7 @@ Smoke tests for wikipedia-mcp — exercises tools directly without spawning stdi
 Run: python3 tests/test_server.py
 """
 
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1030,10 +1031,31 @@ def main() -> int:
     check("dispatcher routes to citation_sources", "Unknown tool" not in out, out[:200])
     check("dispatcher returned real content", "Citation sources for" in out, out[:300])
 
+    section("wanted_articles — most-wanted redlinks")
+    def _wanted_rows(text):
+        return len(re.findall(r"(?m)^\| \d+ \|", text))
+
+    out = server.wanted_articles(limit=8)
+    check("returns header", "Most-wanted missing articles" in out, out[:200])
+    check("table present", "| Missing article | Incoming links |" in out, out[:300])
+    check("limit respected", _wanted_rows(out) == 8, out[:500])
+    check("wikipedia links included", "en.wikipedia.org/wiki/" in out, out[:500])
+    check("template clusters collapsed", "Skipped" in out and "identical link counts" in out, out[-500:])
+
+    section("wanted_articles — limit clamping + type safety")
+    out = server.wanted_articles(limit=999)
+    check("limit=999 clamps to 30", _wanted_rows(out) <= 30, f"rows: {_wanted_rows(out)}")
+    out = server.wanted_articles(limit="abc")
+    check("bad limit falls back to 10", _wanted_rows(out) == 10, out[:200])
+
+    section("wanted_articles — dispatcher routing")
+    out = server._call_tool("wanted_articles", {"limit": 3})
+    check("dispatcher routes to wanted_articles", "Unknown tool" not in out, out[:200])
+
     section("tool registry")
-    check("all 47 tools listed", len(server.TOOLS) == 47)
+    check("all 48 tools listed", len(server.TOOLS) == 48)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date", "wanted_articles"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
