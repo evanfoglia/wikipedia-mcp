@@ -22,7 +22,7 @@ import requests
 
 API_VERSION = "2025-06-18"
 SERVER_NAME = "wikipedia-mcp"
-SERVER_VERSION = "1.1.37"
+SERVER_VERSION = "1.1.38"
 
 # Wikipedia requires a descriptive User-Agent with contact info.
 USER_AGENT = (
@@ -1871,6 +1871,101 @@ def top_reads(date: str = "", limit: int = 10, lang: str = "en") -> str:
         f"\n[View full list]"
         f"(https://wikimedia.org/api/rest_v1/metrics/pageviews/top/"
         f"{lang}.wikipedia/all-access/{dt.year:04d}/{dt.month:02d}/{dt.day:02d})"
+    )
+    return out
+
+
+def wanted_articles(limit: int = 10, lang: str = "en") -> str:
+    """Articles Wikipedia doesn't have yet — ranked by demand.
+
+    Uses the read-only `list=querypage` action API (the same
+    "Wanted pages" special report Wikipedia editors consult) to show
+    the most-wanted missing articles on a language Wikipedia, ranked
+    by how many existing pages link to them. Each row gives the
+    missing title (linked to its red-link page so you can see exactly
+    where the links come from) and its incoming-link count — a demand
+    signal for what the encyclopedia is missing.
+
+    Filters to the article namespace (ns=0): the raw feed is dominated
+    by broken file and template references, which are maintenance
+    noise rather than content gaps. Redlinks that share an identical
+    link count are almost always emitted by a single navbox or
+    template, so after the first two of a run the rest are collapsed —
+    the report says how many were skipped, so the ranking stays a
+    genuine gap list instead of one template's output repeated
+    forty times.
+
+    The discovery companion to `top_reads` (what people read),
+    `recent_changes` (what editors just did), and `random` (serendipity):
+    this shows what *should* exist but doesn't. Useful for editors
+    hunting article ideas, writers finding under-covered topics, and
+    researchers mapping coverage gaps. Read-only via the action API —
+    GET only, no new dependencies.
+    """
+    lang = lang if lang in SUPPORTED_LANGS else "en"
+    try:
+        limit = max(1, min(int(limit), 30))
+    except (TypeError, ValueError):
+        limit = 10
+
+    # qplimit is fixed high: we over-fetch because the ns=0 filter and
+    # template-cluster collapsing discard a chunk of the raw feed.
+    params = {
+        "action": "query",
+        "list": "querypage",
+        "qppage": "Wantedpages",
+        "qplimit": 50,
+        "format": "json",
+        "origin": "*",
+    }
+    try:
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        return f"Couldn't fetch wanted articles: the Wikipedia request failed ({exc})."
+    data = resp.json()
+    if "error" in data:
+        return f"Couldn't fetch wanted articles: {data['error'].get('info', 'API error')}"
+
+    results = data.get("query", {}).get("querypage", {}).get("results", [])
+    articles = [r for r in results if r.get("ns") == 0 and r.get("title")]
+    if not articles:
+        return f"No wanted articles found on {lang}.wikipedia."
+
+    # Collapse template clusters: a run of identical link counts means
+    # one navbox/template emitting many redlinks, not independent demand.
+    rows, skipped, run_count, prev_value = [], 0, 0, None
+    for r in articles:
+        try:
+            value = int(r.get("value", 0))
+        except (TypeError, ValueError):
+            value = 0
+        if value == prev_value:
+            run_count += 1
+        else:
+            run_count, prev_value = 1, value
+        if run_count > 2:
+            skipped += 1
+            continue
+        rows.append((r["title"], value))
+
+    rows = rows[:limit]
+    base = f"https://{lang}.wikipedia.org"
+    out = f"**Most-wanted missing articles on {lang}.wikipedia** (redlinks, ranked by incoming links):\n\n"
+    out += "| Rank | Missing article | Incoming links |\n"
+    out += "|------|-----------------|---------------:|\n"
+    for i, (title, value) in enumerate(rows, 1):
+        slug = _url_quote(title.replace(" ", "_"), safe="")
+        out += f"| {i} | [{title}]({base}/wiki/{slug}) | {value:,} |\n"
+    if skipped:
+        out += (
+            f"\n_Skipped {skipped} further redlink(s) with identical link counts — "
+            "identical counts almost always come from a single template or "
+            "navbox linking many missing pages._\n"
+        )
+    out += (
+        f"\n[Browse the full Wanted Pages report]"
+        f"({base}/wiki/Special:WantedPages)"
     )
     return out
 
@@ -5810,6 +5905,38 @@ TOOLS = [
             "required": ["title", "date"],
         },
     },
+    {
+        "name": "wanted_articles",
+        "description": (
+            "Articles Wikipedia doesn't have yet — ranked by demand. Uses "
+            "the read-only Wanted Pages report (action API list=querypage) "
+            "to list the most-wanted missing articles on a language "
+            "Wikipedia: redlink titles ranked by how many existing pages "
+            "link to them. Article namespace only; template-driven "
+            "redlink clusters (identical link counts) are collapsed. The "
+            "discovery companion to `top_reads` (what people read) and "
+            "`recent_changes` (what editors just did): shows what should "
+            "exist but doesn't. Read-only via the action API — GET only, "
+            "no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max missing articles to show (default 10, max 30)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -5908,6 +6035,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_path(**args)
     if name == "article_at_date":
         return article_at_date(**args)
+    if name == "wanted_articles":
+        return wanted_articles(**args)
     return f"Unknown tool: {name}"
 
 
