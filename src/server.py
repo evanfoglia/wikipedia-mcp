@@ -4410,6 +4410,73 @@ def article_pulse(article: str = "", lang: str = "en") -> str:
     return out
 
 
+def template_usage(template: str, limit: int = 20, lang: str = "en") -> str:
+    """Find articles that transclude a given template (template usage).
+
+    Lists the first N articles that embed the given template — "what
+    transcludes this template". The transclusion sibling of `backlinks`
+    (which only sees plain wikilinks, not `{{template}}` embeds): uses
+    MediaWiki's read-only `list=embeddedin` endpoint. Useful for building
+    research corpora ("every article using this infobox"), measuring a
+    navbox's reach, auditing deprecated-template cleanup ("which articles
+    still use this old template"), and finding template-driven content
+    clusters. Accepts the name with or without the "Template:" prefix;
+    template redirects are resolved. Article namespace only. Read-only
+    (HTTPS GET).
+    """
+    template = (template or "").strip()
+    if not template:
+        return "A template name is required."
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+    if ":" not in template:
+        template = "Template:" + template
+
+    params = {
+        "action": "query",
+        "list": "embeddedin",
+        "eititle": template,
+        "eilimit": str(limit),
+        "einamespace": "0",  # articles only
+        "format": "json",
+        "origin": "*",
+    }
+    try:
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return f"Could not look up template usage for '{template}'."
+    if "error" in data:
+        return (
+            f"Could not look up template usage: "
+            f"{data['error'].get('info', 'API error')}"
+        )
+
+    pages = data.get("query", {}).get("embeddedin", [])
+    if not pages:
+        return (
+            f"No articles transclude '{template}'. "
+            "(The template may not exist, or nothing uses it yet.)"
+        )
+
+    base = _wiki(lang).replace("/w/api.php", "")
+    out = f"**Articles transcluding {template}** (first {len(pages)}):\n\n"
+    for p in pages:
+        title = p.get("title", "").strip()
+        if title:
+            out += f"- [{title}]({base}/wiki/{_slug(title)})\n"
+    out += (
+        f"\n[View template]({base}/wiki/{_slug(template)}) · "
+        f"[Full transclusion list]"
+        f"({base}/wiki/Special:WhatLinksHere/{_slug(template)}"
+        f"?hidelinks=1&hidetrans=0)"
+    )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Tool registry — schemas declared in one place for clarity
 # ---------------------------------------------------------------------------
@@ -5937,6 +6004,43 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "template_usage",
+        "description": (
+            "Which articles transclude a given template — \"what embeds "
+            "this template\". Lists the first N articles that embed "
+            "`{{template}}` (with or without the \"Template:\" prefix; "
+            "template redirects are resolved), each linked to its article, "
+            "plus links to the template page and the full transclusion "
+            "list on-wiki. The transclusion sibling of `backlinks` (which "
+            "only sees plain wikilinks): use it to build research corpora "
+            "(\"every article using this infobox\"), measure a navbox's "
+            "reach, or audit deprecated-template cleanup. Article "
+            "namespace only. Read-only via the action API — GET only, no "
+            "new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "template": {
+                    "type": "string",
+                    "description": "Template name, with or without the 'Template:' prefix (e.g. 'Infobox officeholder')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max articles to show (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -6037,6 +6141,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_at_date(**args)
     if name == "wanted_articles":
         return wanted_articles(**args)
+    if name == "template_usage":
+        return template_usage(**args)
     return f"Unknown tool: {name}"
 
 
