@@ -1052,10 +1052,38 @@ def main() -> int:
     out = server._call_tool("wanted_articles", {"limit": 3})
     check("dispatcher routes to wanted_articles", "Unknown tool" not in out, out[:200])
 
+    section("template_usage — basic")
+    out = server.template_usage("Infobox officeholder", limit=5)
+    check("returns header", "Articles transcluding Template:Infobox officeholder" in out, out[:200])
+    check("lists articles", out.count("- [") >= 1, out[:500])
+    check("article links included", "en.wikipedia.org/wiki/" in out, out[:500])
+    check("template page linked", "View template" in out, out[-400:])
+    check("full list linked", "Special:WhatLinksHere" in out, out[-400:])
+
+    section("template_usage — prefix normalization")
+    out = server.template_usage("Template:Citation needed", limit=3)
+    check("explicit prefix works", "Articles transcluding Template:Citation needed" in out, out[:200])
+    check("articles listed", out.count("- [") >= 1, out[:500])
+
+    section("template_usage — edge cases")
+    out = server.template_usage("")
+    check("empty template reported", "template name is required" in out, out[:200])
+    out = server.template_usage("ThisTemplateDoesNotExistZZZ123")
+    check("missing template reported", "No articles transclude" in out, out[:200])
+    out = server.template_usage("Infobox officeholder", limit=999)
+    check("limit=999 clamps to 50", out.count("- [") <= 50, f"rows: {out.count('- [')}")
+    out = server.template_usage("Infobox officeholder", limit="abc")
+    check("bad limit falls back to 20", out.count("- [") <= 20, out[:200])
+
+    section("template_usage — dispatcher routing")
+    out = server._call_tool("template_usage", {"template": "Infobox", "limit": 3})
+    check("dispatcher routes to template_usage", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Articles transcluding" in out, out[:300])
+
     section("tool registry")
-    check("all 48 tools listed", len(server.TOOLS) == 48)
+    check("all 49 tools listed", len(server.TOOLS) == 49)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date", "wanted_articles"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date", "wanted_articles", "template_usage"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
@@ -1919,6 +1947,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "ChatGPT", "date": "2023-01-15"})
         elif name == "simple_summary":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "template_usage":
+            out = server._call_tool(name, {"template": "Infobox", "limit": 2})
         else:
             out = server._call_tool(name, {})
         check(
