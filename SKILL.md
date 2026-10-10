@@ -60,6 +60,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `article_path` | Find the shortest click-path between two articles — the six-degrees game: searches Wikipedia's link graph for the shortest chain of blue links (1–3 hops, bidirectional and bounded), follows redirects; the discovery companion to `links` and `backlinks` |
 | `article_at_date` | Show what an article said on a given date — the time machine: given a title and a YYYY-MM-DD date, returns the lead text of the latest surviving revision at or before that day, with revision ID, timestamp, editor, edit summary, and a permanent link to the exact revision; follows redirects; the history companion to `summary`, `revisions`, and `revision_diff` |
 | `wanted_articles` | Most-wanted missing articles (redlinks) ranked by incoming-link count — article namespace only, template-driven clusters collapsed (discovery companion to `top_reads` / `recent_changes`) |
+| `template_usage` | Which articles embed a given template (transclusions, not plain links) — name with or without `Template:` prefix, redirects resolved, article namespace only (discovery companion to `backlinks` / `category_members`) |
 
 All tools accept an optional `lang` parameter (default `en`; supported: `en`, `de`, `es`, `fr`, `ja`, `zh`, `pt`, `it`, `ru`, `nl`), except `media_search` — Wikimedia Commons is language-independent, so it takes no `lang`. Note: `quote` accepts the parameter for API consistency but is currently English-only (curated list).
 
