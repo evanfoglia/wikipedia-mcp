@@ -1970,6 +1970,80 @@ def wanted_articles(limit: int = 10, lang: str = "en") -> str:
     return out
 
 
+def most_linked(limit: int = 10, lang: str = "en") -> str:
+    """The most-referenced articles on Wikipedia — ranked by incoming links.
+
+    Uses the read-only `list=querypage` action API (Wikipedia's "Most
+    linked-to pages" special report) to list the articles with the most
+    incoming links on a language Wikipedia. This is the in-link popularity
+    ranking of the encyclopedia: the articles that everything else points
+    to — a measure of how central a topic is to the link graph, distinct
+    from how often it's read.
+
+    Filters to the article namespace (ns=0): the raw feed is dominated by
+    project-namespace pages (policies, guidelines, WikiProjects), which are
+    maintenance noise rather than content. Unlike `backlinks` (which lists
+    the articles linking TO one given article), this is the global ranking —
+    the discovery companion to `top_reads` (what people read) and
+    `wanted_articles` (what's missing, ranked by the same demand signal):
+    this shows what's most central to what exists. Read-only via the action
+    API — GET only, no new dependencies.
+    """
+    lang = lang if lang in SUPPORTED_LANGS else "en"
+    try:
+        limit = max(1, min(int(limit), 30))
+    except (TypeError, ValueError):
+        limit = 10
+
+    # qplimit is fixed high: we over-fetch because the ns=0 filter discards
+    # the project-namespace pages that dominate the top of the raw feed
+    # (one 500-row page yields ~100 article rows — plenty for limit ≤ 30).
+    params = {
+        "action": "query",
+        "list": "querypage",
+        "qppage": "Mostlinked",
+        "qplimit": 500,
+        "format": "json",
+        "origin": "*",
+    }
+    try:
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        return f"Couldn't fetch most-linked articles: the Wikipedia request failed ({exc})."
+    data = resp.json()
+    if "error" in data:
+        return f"Couldn't fetch most-linked articles: {data['error'].get('info', 'API error')}"
+
+    results = data.get("query", {}).get("querypage", {}).get("results", [])
+    rows = []
+    for r in results:
+        if r.get("ns") != 0 or not r.get("title"):
+            continue
+        try:
+            value = int(r.get("value", 0))
+        except (TypeError, ValueError):
+            value = 0
+        rows.append((r["title"], value))
+        if len(rows) >= limit:
+            break
+    if not rows:
+        return f"No most-linked articles found on {lang}.wikipedia."
+
+    base = f"https://{lang}.wikipedia.org"
+    out = f"**Most-referenced articles on {lang}.wikipedia** (ranked by incoming links):\n\n"
+    out += "| Rank | Article | Incoming links |\n"
+    out += "|------|---------|----------------:|\n"
+    for i, (title, value) in enumerate(rows, 1):
+        slug = _url_quote(title.replace(" ", "_"), safe="")
+        out += f"| {i} | [{title}]({base}/wiki/{slug}) | {value:,} |\n"
+    out += (
+        f"\n[Browse the full Most Linked report]"
+        f"({base}/wiki/Special:MostLinked)"
+    )
+    return out
+
+
 def media_list(title: str, limit: int = 25, lang: str = "en") -> str:
     """List all media (images, videos, audio) used in a Wikipedia article.
 
@@ -6005,6 +6079,40 @@ TOOLS = [
         },
     },
     {
+        "name": "most_linked",
+        "description": (
+            "The most-referenced articles on Wikipedia — ranked by incoming "
+            "links. Uses the read-only Most Linked report (action API "
+            "list=querypage) to list the articles with the most incoming "
+            "links on a language Wikipedia: the in-link popularity ranking "
+            "of the encyclopedia, a measure of how central a topic is to "
+            "the link graph rather than how often it's read. Article "
+            "namespace only (project-namespace policy pages filtered out). "
+            "The discovery companion to `top_reads` (what people read), "
+            "`wanted_articles` (what's missing, ranked by the same demand "
+            "signal), and `backlinks` (per-article inbound links): shows "
+            "what's most central to what exists. Read-only via the action "
+            "API — GET only, no new dependencies."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max articles to show (default 10, max 30)",
+                    "default": 10,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "template_usage",
         "description": (
             "Which articles transclude a given template — \"what embeds "
@@ -6141,6 +6249,8 @@ def _call_tool(name: str, args: dict) -> str:
         return article_at_date(**args)
     if name == "wanted_articles":
         return wanted_articles(**args)
+    if name == "most_linked":
+        return most_linked(**args)
     if name == "template_usage":
         return template_usage(**args)
     return f"Unknown tool: {name}"
