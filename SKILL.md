@@ -19,6 +19,7 @@ Access Wikipedia via Model Context Protocol (MCP). No API key required.
 | `did_you_know` | Random "Did You Know" fact |
 | `dino_fact` | Dinosaur/prehistory fact (specific species or random) |
 | `featured_article` | Today's Wikipedia Featured Article |
+| `featured_list` | Wikipedia's Featured List of the day — the curated list pick (today, or a YYYYMMDD date) |
 | `picture_of_the_day` | Wikimedia Commons' Picture of the Day — curated daily image (default today UTC, optional YYYYMMDD date) |
 | `media_of_the_day` | Wikimedia Commons' Media of the Day — curated daily video/audio clip (default today UTC, optional YYYYMMDD date) |
 | `article_extract` | Full plain-text article extract by title (longer than `summary`) |
@@ -182,6 +183,7 @@ Uses Wikipedia's free public REST API — no API key required.
 - All responses include links back to the source article
 - `dino_fact` falls back to a random species if the requested one isn't found (instead of erroring)
 - `featured_article` returns today's curated Featured Article — great for daily content hooks
+- `featured_list` returns Wikipedia's Featured List of the day — the editors' curated list pick from the Main Page, the list counterpart to `featured_article`. Accepts an optional `date` (YYYYMMDD, default today UTC) to browse past featured lists. Returns the list title linked to the article, the day's blurb with key links, and the illustrative image with caption + Commons file page. Featured lists are scheduled on English Wikipedia only; dates too far in the future may not be queued yet.
 - `picture_of_the_day` returns Wikimedia Commons' Picture of the Day from Wikipedia's featured feed — the visual counterpart to `featured_article`. Accepts an optional `date` (YYYYMMDD, default today UTC) to browse past pictures. Returns the embedded thumbnail preview, file name, photographer/artist, license, description, and links to the full-size image + Commons file page. `image`/`media_list` cover article-specific media; this covers the editorially curated daily pick.
 - `media_of_the_day` returns Wikimedia Commons' Media of the Day — the curated daily video or audio clip, the motion-and-sound counterpart to `picture_of_the_day`. Accepts an optional `date` (YYYYMMDD, default today UTC) to browse past picks; some dates have no Media of the Day and return a clear message. Returns the media kind, duration, a preview thumbnail (video) or listen link (audio), file name, artist, license, description, and links to the direct file + Commons file page.
 - `article_extract` returns the full plain-text article (vs `summary`'s short extract + thumbnail) — use when you need more than a summary
