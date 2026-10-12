@@ -759,6 +759,118 @@ def featured_article(lang: str = "en") -> str:
     return _summary_block(data, fallback_title=data.get("title", "Featured Article"))
 
 
+_TFL_FIELD_RE = re.compile(
+    r"\|([a-z_]+)\s*=\s*(.*?)(?=\n\|[a-z_]+\s*=|\n\}\}\s*$|\Z)", re.S
+)
+
+
+def _tfl_field(wikitext: str, name: str) -> str:
+    """Extract a |name= field from a {{TFLcontent}} template block."""
+    for m in _TFL_FIELD_RE.finditer(wikitext):
+        if m.group(1).lower() == name:
+            return m.group(2).strip()
+    return ""
+
+
+def _tfl_blurb_to_markdown(blurb: str) -> str:
+    """Convert a TFL blurb (bold + wikilinks + entities) to markdown."""
+    text = re.sub(r"<!--.*?-->", "", blurb, flags=re.S)
+
+    def _link(m: "re.Match") -> str:
+        target = m.group(1).strip()
+        try:
+            piped = m.group(2)
+        except IndexError:
+            piped = None
+        label = (piped or target).strip()
+        return f"[{label}](https://en.wikipedia.org/wiki/{_slug(target)})"
+
+    text = re.sub(r"\[\[([^|\]]+)\|([^\]]+)\]\]", _link, text)
+    text = re.sub(r"\[\[([^\]]+)\]\]", _link, text)
+    text = text.replace("'''", "**").replace("''", "*")
+    text = unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def featured_list(date: str = "", lang: str = "en") -> str:
+    """Get Wikipedia's Featured List of the day — the Main Page's curated list.
+
+    Featured lists are Wikipedia's showcase of its finest list articles —
+    the list counterpart to `featured_article` (long-form), and a strong
+    daily discovery hook: list articles are among the most browsable
+    content on Wikipedia. `date` is an optional YYYYMMDD string (default:
+    today UTC) to browse past featured lists. Returns the list title linked
+    to the article, the day's blurb with key links, and the illustrative
+    image with caption.
+
+    Featured lists are scheduled on English Wikipedia only, and new lists
+    are queued close to their date — so a date too far in the future
+    returns a clear "not scheduled yet" message. Read-only.
+    """
+    lang = lang if lang in SUPPORTED_LANGS else "en"
+    if lang != "en":
+        return (
+            "Featured lists are scheduled on English Wikipedia only — "
+            "call featured_list() with the default lang='en'."
+        )
+    if date == "":
+        dt = datetime.now(timezone.utc)
+    else:
+        try:
+            dt = datetime.strptime(date, "%Y%m%d")
+        except ValueError:
+            return f"Error: date must be in YYYYMMDD format (got '{date}')"
+    page = (
+        f"Wikipedia:Today's featured list/{dt.strftime('%B')} {dt.day}, "
+        f"{dt.year}"
+    )
+    resp = _get(
+        _wiki("en"),
+        params={
+            "action": "parse",
+            "page": page,
+            "prop": "wikitext",
+            "redirects": 1,
+            "format": "json",
+            "formatversion": "2",
+            "origin": "*",
+        },
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    datestr = dt.strftime("%Y-%m-%d")
+    if "error" in data:
+        return (
+            f"No featured list found for {datestr}. Featured lists are "
+            "scheduled close to their date — a future date may simply not "
+            "be queued yet."
+        )
+    wt = (data.get("parse") or {}).get("wikitext", "")
+    link = _tfl_field(wt, "link")
+    if not link:
+        return f"Could not parse the featured list for {datestr}."
+    blurb = _tfl_blurb_to_markdown(_tfl_field(wt, "blurb"))
+    img_title = _tfl_field(wt, "title")
+    img_file = _tfl_field(wt, "image")
+    dateline = f"{dt.strftime('%B')} {dt.day}, {dt.year}"
+    out = f"\U0001F4CB **Featured List — {dateline}**\n\n"
+    out += f"## [{link}](https://en.wikipedia.org/wiki/{_slug(link)})\n\n"
+    if img_file:
+        img_file = re.sub(r"(?i)^file\s*:\s*", "", img_file)
+        file_q = _url_quote(img_file.replace(" ", "_"), safe="")
+        thumb = (
+            "https://commons.wikimedia.org/wiki/Special:FilePath/"
+            f"{file_q}?width=800"
+        )
+        filepage = f"https://commons.wikimedia.org/wiki/File:{file_q}"
+        caption = img_title or link
+        out += f"![{caption}]({thumb})\n*{caption} — [file page]({filepage})*\n\n"
+    if blurb:
+        out += f"{blurb}\n\n"
+    out += f"[View list](https://en.wikipedia.org/wiki/{_slug(link)})"
+    return out
+
+
 def picture_of_the_day(date: str = "", lang: str = "en") -> str:
     """Get Wikimedia Commons' Picture of the Day.
 
@@ -4806,6 +4918,33 @@ TOOLS = [
         },
     },
     {
+        "name": "featured_list",
+        "description": (
+            "Get Wikipedia's Featured List of the day — the editors' curated list pick from the Main Page, "
+            "the list counterpart to `featured_article` (long-form). List articles are among the most "
+            "browsable content on Wikipedia, so this is a strong daily discovery hook. Accepts an optional "
+            "`date` (YYYYMMDD, default today UTC) to browse past featured lists. Returns the list title "
+            "linked to the article, the day's blurb with key links, and the illustrative image with "
+            "caption. Featured lists are scheduled on English Wikipedia only; dates too far in the future "
+            "may not be queued yet."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYYMMDD format (default: today UTC) — browse past featured lists",
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en'; featured lists are scheduled on English Wikipedia only)",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+        },
+    },
+    {
         "name": "picture_of_the_day",
         "description": (
             "Get Wikimedia Commons' Picture of the Day — the curated daily "
@@ -6167,6 +6306,8 @@ def _call_tool(name: str, args: dict) -> str:
         return dino_fact(**args)
     if name == "featured_article":
         return featured_article(**args)
+    if name == "featured_list":
+        return featured_list(**args)
     if name == "picture_of_the_day":
         return picture_of_the_day(**args)
     if name == "media_of_the_day":
