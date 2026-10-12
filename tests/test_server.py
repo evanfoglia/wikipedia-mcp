@@ -206,6 +206,36 @@ def main() -> int:
     out = server.featured_article()
     check("returns markdown", out.startswith("## "), out[:200])
 
+    section("featured_list")
+    out = server.featured_list()
+    check("returns header", out.startswith("\U0001F4CB **Featured List"), out[:200])
+    check("links to a list article", "en.wikipedia.org/wiki/" in out, out[:500])
+    check("includes blurb", len(out) > 300, out[:200])
+    check("includes Commons image", "commons.wikimedia.org" in out, out[:600])
+
+    section("featured_list — explicit past date")
+    out = server.featured_list(date="20260930")
+    check("historical date returns header", out.startswith("\U0001F4CB **Featured List"), out[:200])
+    check("header shows the requested date", "September 30, 2026" in out, out[:200])
+    check("correct list for that date", "Kaik" in out, out[:400])
+
+    section("featured_list — bad date")
+    out = server.featured_list(date="notadate")
+    check("rejects bad date with format hint", "YYYYMMDD" in out, out[:200])
+
+    section("featured_list — far future date")
+    out = server.featured_list(date="20300101")
+    check("future date gets a clear not-scheduled message", "No featured list found" in out, out[:200])
+
+    section("featured_list — non-English lang")
+    out = server.featured_list(lang="de")
+    check("non-en gets a clear message", "English Wikipedia only" in out, out[:200])
+
+    section("featured_list — dispatcher routing")
+    out = server._call_tool("featured_list", {})
+    check("dispatcher routes to featured_list", "Unknown tool" not in out, out[:200])
+    check("dispatcher returned real content", "Featured List" in out, out[:200])
+
     section("picture_of_the_day")
     out = server.picture_of_the_day()
     check("returns header", out.startswith("🖼️ **Picture of the Day"), out[:200])
@@ -1103,9 +1133,9 @@ def main() -> int:
     check("dispatcher returned real content", "Most-referenced articles" in out, out[:300])
 
     section("tool registry")
-    check("all 50 tools listed", len(server.TOOLS) == 50)
+    check("all 51 tools listed", len(server.TOOLS) == 51)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date", "wanted_articles", "most_linked", "template_usage"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "featured_list", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date", "wanted_articles", "most_linked", "template_usage"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
