@@ -19,6 +19,7 @@ Contributions are welcome — new tools especially. See [CONTRIBUTING.md](CONTRI
 | `did_you_know` | Get a random "Did You Know" style fact |
 | `dino_fact` | Get a dino/prehistory-specific fact (specific species or random) |
 | `featured_article` | Get today's Wikipedia Featured Article |
+| `featured_list` | Get Wikipedia's Featured List of the day — the curated list pick (today, or a YYYYMMDD date) |
 | `picture_of_the_day` | Get Wikimedia Commons' Picture of the Day (today, or a YYYYMMDD date) |
 | `media_of_the_day` | Get Wikimedia Commons' Media of the Day — the curated daily video/audio clip (today, or a YYYYMMDD date) |
 | `article_extract` | Get a full plain-text extract of an article (longer than `summary`) |
