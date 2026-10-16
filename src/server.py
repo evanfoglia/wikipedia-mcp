@@ -1430,6 +1430,100 @@ def external_links(title: str, limit: int = 20, lang: str = "en") -> str:
     return out
 
 
+def who_links_to(domain: str, limit: int = 20, lang: str = "en") -> str:
+    """Find Wikipedia articles that link to a given external URL or domain.
+
+    Returns the first N main-namespace articles linking TO the given
+    external URL/domain — i.e. the Wikipedia backlinks of an off-wiki
+    site. This is the inbound complement to `external_links` (which lists
+    the off-wiki URLs one article points to): `who_links_to` reverses the
+    direction, answering "which Wikipedia articles point at this site?"
+    Each article is grouped with the exact URLs it uses, so you can see
+    whether the domain is cited as a source, linked in an external-links
+    section, or embedded via a template.
+
+    Uses the MediaWiki Action API's `list=exturlusage` (substring match on
+    the URL), filtered to the article namespace so talk/user pages don't
+    pollute the result. Accepts a bare domain ("nytimes.com") or a full
+    URL ("https://example.com/report.pdf"); the scheme is stripped and
+    matching is case-insensitive, so a bare domain covers all of its
+    subdomains and paths. Follows result pages (`eucontinue`) until
+    `limit` distinct articles are collected, since the API can return
+    short pages for this module.
+
+    Useful for source-spread research (how widely is this publisher cited
+    across Wikipedia?), site owners checking their Wikipedia coverage, and
+    auditing which articles link to a deprecated or unreliable source.
+    Pairs with `external_links` (outbound), `backlinks` (inbound
+    wikilinks), and `citation_sources` (per-article source mix).
+    """
+    query = (domain or "").strip().lower()
+    for scheme in ("https://", "http://"):
+        if query.startswith(scheme):
+            query = query[len(scheme):]
+            break
+    query = query.rstrip("/")
+    if not query:
+        return "Please provide a domain or URL to search for (e.g. 'nytimes.com')."
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 20
+
+    # Group matched URLs by article, preserving API order. The API can
+    # return short pages for exturlusage, so paginate (bounded) until we
+    # have `limit` articles or the results run out.
+    by_article = {}
+    eucontinue = None
+    for _ in range(5):
+        params = {
+            "action": "query",
+            "list": "exturlusage",
+            "euquery": query,
+            "eunamespace": 0,
+            "eulimit": 500,
+            "format": "json",
+            "origin": "*",
+        }
+        if eucontinue:
+            params["eucontinue"] = eucontinue
+        resp = _get(_wiki(lang), params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        for row in data.get("query", {}).get("exturlusage", []):
+            title = (row.get("title") or "").strip()
+            url = (row.get("url") or "").strip()
+            if not title:
+                continue
+            by_article.setdefault(title, [])
+            if url and url not in by_article[title]:
+                by_article[title].append(url)
+            if len(by_article) >= limit:
+                break
+        eucontinue = data.get("continue", {}).get("eucontinue")
+        if len(by_article) >= limit or not eucontinue:
+            break
+
+    if not by_article:
+        return f"No Wikipedia articles link to '{query}'."
+    articles = list(by_article.items())[:limit]
+
+    out = f'**Wikipedia articles linking to "{query}":**\n\n'
+    for title, urls in articles:
+        out += (
+            f"- [{title}]"
+            f"(https://{lang}.wikipedia.org/wiki/{_slug(title)})\n"
+        )
+        for url in urls:
+            out += f"  - {url}\n"
+    out += (
+        f"\n[Full link search on Wikipedia]"
+        f"(https://{lang}.wikipedia.org/wiki/Special:LinkSearch"
+        f"?target={_url_quote(query, safe='')})"
+    )
+    return out
+
+
 def nearby(title: str = "", lat=None, lon=None, radius: int = 1000,
            limit: int = 20, lang: str = "en") -> str:
     """List Wikipedia articles geographically near a location.
@@ -5203,6 +5297,41 @@ TOOLS = [
         },
     },
     {
+        "name": "who_links_to",
+        "description": (
+            "Find Wikipedia articles that link to a given external URL or "
+            "domain — the inbound complement to `external_links`: given "
+            "'nytimes.com', see which articles point at it and the exact "
+            "URLs they use. Useful for source-spread research (how widely "
+            "is this publisher cited?), site owners checking Wikipedia "
+            "coverage, and auditing which articles link to a deprecated or "
+            "unreliable source. Accepts a bare domain or a full URL; a bare "
+            "domain covers all its subdomains and paths. Filters to "
+            "main-namespace articles."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Domain or URL to find links to (e.g. 'nytimes.com' or 'https://example.com/report.pdf')",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max linking articles to return (default 20, max 50)",
+                    "default": 20,
+                },
+                "lang": {
+                    "type": "string",
+                    "description": "Wikipedia language code (default 'en')",
+                    "default": "en",
+                    "enum": list(SUPPORTED_LANGS),
+                },
+            },
+            "required": ["domain"],
+        },
+    },
+    {
         "name": "nearby",
         "description": (
             "List Wikipedia articles geographically near a location — "
@@ -6332,6 +6461,8 @@ def _call_tool(name: str, args: dict) -> str:
         return backlinks(**args)
     if name == "external_links":
         return external_links(**args)
+    if name == "who_links_to":
+        return who_links_to(**args)
     if name == "nearby":
         return nearby(**args)
     if name == "translations":
