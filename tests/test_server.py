@@ -559,6 +559,68 @@ def main() -> int:
         out[:200],
     )
 
+    def _who_links_to_articles(out):
+        return sum(1 for line in out.splitlines() if line.startswith("- ["))
+
+    section("who_links_to")
+    out = server.who_links_to("nytimes.com")
+    check("returns header", out.startswith('**Wikipedia articles linking to "nytimes.com"'), out[:200])
+    check("article bullets present", _who_links_to_articles(out) >= 1, out[:500])
+    check("matched URLs shown", "nytimes.com" in out, out[:500])
+    check("article titles are wiki-linked", "en.wikipedia.org/wiki/" in out, out[:500])
+    check("Special:LinkSearch footer", "Special:LinkSearch" in out, out[-300:])
+
+    section("who_links_to — full URL input (scheme stripped)")
+    out = server.who_links_to("https://www.nytimes.com/")
+    check(
+        "scheme stripped, bare domain matched",
+        out.startswith('**Wikipedia articles linking to "www.nytimes.com"') or 'linking to "nytimes.com"' in out,
+        out[:200],
+    )
+    check("still finds linkers", _who_links_to_articles(out) >= 1, out[:500])
+
+    section("who_links_to — limit clamping + type safety")
+    out = server.who_links_to("nytimes.com", limit=999)
+    check("limit=999 clamps to ≤50", _who_links_to_articles(out) <= 50, out[:300])
+    out = server.who_links_to("nytimes.com", limit=-5)
+    check("limit=-5 clamps to 1", _who_links_to_articles(out) == 1, out[:300])
+    out = server.who_links_to("nytimes.com", limit="abc")
+    check(
+        "non-int limit returns results (no crash)",
+        out.startswith("**Wikipedia articles linking to"),
+        out[:200],
+    )
+
+    section("who_links_to — no matches")
+    out = server.who_links_to("this-domain-definitely-does-not-exist-xyz123.com")
+    check("graceful empty", "No Wikipedia articles link to" in out, out[:300])
+
+    section("who_links_to — empty domain")
+    out = server.who_links_to("")
+    check("empty domain returns guidance", "provide a domain" in out, out[:200])
+    out = server.who_links_to("   ")
+    check("blank domain returns guidance", "provide a domain" in out, out[:200])
+
+    section("who_links_to — multi-language")
+    out = server.who_links_to("lemonde.fr", limit=3, lang="fr")
+    check("fr returns linkers", out.startswith("**Wikipedia articles linking to"), out[:300])
+    check("fr wikipedia links", "fr.wikipedia.org/wiki/" in out, out[:500])
+
+    section("who_links_to — dispatcher routing")
+    out = server._call_tool("who_links_to", {"domain": "bbc.co.uk"})
+    check("dispatcher routes to who_links_to", "Unknown tool" not in out, out[:200])
+    check(
+        "dispatcher returned real content",
+        out.startswith("**Wikipedia articles linking to"),
+        out[:200],
+    )
+
+    section("who_links_to — registry schema")
+    entry = next(t for t in server.TOOLS if t["name"] == "who_links_to")
+    check("tool registered", entry["name"] == "who_links_to")
+    check("domain is required", entry["inputSchema"].get("required") == ["domain"])
+    check("limit defaults to 20", entry["inputSchema"]["properties"]["limit"]["default"] == 20)
+
     section("nearby")
     out = server.nearby("Eiffel Tower", limit=10)
     check("returns header", out.startswith("**Articles near"), out[:200])
@@ -1133,9 +1195,9 @@ def main() -> int:
     check("dispatcher returned real content", "Most-referenced articles" in out, out[:300])
 
     section("tool registry")
-    check("all 51 tools listed", len(server.TOOLS) == 51)
+    check("all 52 tools listed", len(server.TOOLS) == 52)
     names = {t["name"] for t in server.TOOLS}
-    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "featured_list", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date", "wanted_articles", "most_linked", "template_usage"}
+    expected = {"search", "summary", "random", "simple_summary", "did_you_know", "dino_fact", "featured_article", "featured_list", "article_extract", "article_sections", "on_this_day", "deaths_on_this_day", "births_on_this_day", "categories", "links", "backlinks", "external_links", "who_links_to", "nearby", "translations", "revisions", "pageviews", "news", "top_reads", "image", "media_list", "media_search", "quote", "picture_of_the_day", "media_of_the_day", "recent_changes", "category_members", "infobox", "article_quality", "related_articles", "contributors", "references", "section_text", "revision_diff", "disambiguation", "user_contribs", "citation_needed", "talk", "article_flags", "article_protection", "article_pulse", "citation_sources", "article_path", "article_at_date", "wanted_articles", "most_linked", "template_usage"}
     check("expected tool names", names == expected, f"got {names}")
 
     section("pageviews")
