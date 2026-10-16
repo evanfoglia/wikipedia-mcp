@@ -2012,6 +2012,8 @@ def main() -> int:
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "external_links":
             out = server._call_tool(name, {"title": "Velociraptor"})
+        elif name == "who_links_to":
+            out = server._call_tool(name, {"domain": "nytimes.com", "limit": 2})
         elif name == "translations":
             out = server._call_tool(name, {"title": "Velociraptor"})
         elif name == "revisions":
