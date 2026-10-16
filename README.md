@@ -32,6 +32,7 @@ Contributions are welcome — new tools especially. See [CONTRIBUTING.md](CONTRI
 | `links` | List outgoing Wikipedia links from an article (the article's reference network) |
 | `backlinks` | List incoming Wikipedia links to an article (what links here / referrer pages — inverse of `links`) |
 | `external_links` | List external (off-wiki) links from an article — citations, references, and primary sources the article points to (outbound complement to `links` + `backlinks`) |
+| `who_links_to` | Find Wikipedia articles linking to a given external URL or domain — the inbound complement to `external_links`: which articles point at a site and the exact URLs they use (source-spread research, coverage checks, unreliable-source audits) |
 | `nearby` | List Wikipedia articles geographically near a location — anchor by article title (e.g. 'Eiffel Tower') or lat/lon, with distances |
 | `translations` | List all language versions of an article (langlinks) — discover what languages it exists in |
 | `revisions` | Show an article's recent edit history (who edited it, when, edit summaries, size deltas) with diff links |
